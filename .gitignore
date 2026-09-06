@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.local
+.env.*.local
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+server/uploads/
+server/storage/
+client/dist/
+*.tsbuildinfo
+
+# A throwaway local PostgreSQL cluster (see docs/local-database.md).
+# Never committed: it holds a real data directory.
+.devdb/

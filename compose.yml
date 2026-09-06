@@ -1,0 +1,189 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Collex Inquiries — Docker Compose
+# ═══════════════════════════════════════════════════════════════════════════
+#  Services:
+#    postgres  → PostgreSQL 16
+#    redis     → Redis 7 (cache, rate limits, BullMQ)
+#    api       → NestJS HTTP + WebSocket server
+#    worker    → BullMQ consumer (imports, exports, PDF, notifications)
+#    nginx     → serves the built SPA and proxies /api
+#
+#  api and worker run the SAME image from the SAME build. Splitting them into
+#  two images would let the two halves drift; splitting them into one process
+#  would let a 40-second PDF render starve the request loop. One image, two
+#  entrypoints.
+#
+#  Host ports are deliberately offset from Collex System V1 (5433/5000/80) so
+#  both products can run on one machine.
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: collex-inq-postgres
+    restart: unless-stopped
+    ports:
+      # Bound to loopback: the database is for the compose network, not the LAN.
+      - '127.0.0.1:5434:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [collex-inq]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: { max-size: '50m', max-file: '5' }
+
+  redis:
+    image: redis:7-alpine
+    container_name: collex-inq-redis
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:6381:6379'
+    # 'noeviction' is required, not preferred — BullMQ warns loudly about
+    # anything else, and it is right to: under an LRU policy Redis is free to
+    # drop a job hash while the job is queued. The visible failure is an
+    # ExportJob row stuck in PENDING forever with nothing left to retry it.
+    # Refusing writes when memory runs out is the honest behaviour; the queue
+    # backs up visibly instead of losing work quietly.
+    #
+    # Persistence stays off: a lost queue is recoverable (the database rows
+    # that triggered the jobs are still there), a lost job is not.
+    command: ['redis-server', '--appendonly', 'no', '--maxmemory-policy', 'noeviction']
+    networks: [collex-inq]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: collex-inq-api
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment: &api_env
+      NODE_ENV: ${NODE_ENV:-production}
+      # NOT ${DATABASE_URL}. The value in .env is the HOST view —
+      # localhost:5434, which is what `npm run start:local` needs. Inside this
+      # network "localhost" is the api container itself, so the URL is rebuilt
+      # here from the same credentials against the service name. Point at a
+      # managed database by setting DATABASE_URL_DOCKER.
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public}
+      DB_CONNECTION_LIMIT: ${DB_CONNECTION_LIMIT:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-10}
+      REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379}
+      PORT: ${PORT:-5100}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      JWT_INVESTIGATOR_REFRESH_EXPIRES_IN: ${JWT_INVESTIGATOR_REFRESH_EXPIRES_IN:-90d}
+      AUTH_MAX_FAILED_LOGINS: ${AUTH_MAX_FAILED_LOGINS:-5}
+      AUTH_LOCKOUT_MINUTES: ${AUTH_LOCKOUT_MINUTES:-15}
+      # Same story: in this stack the SPA is served by nginx on WEB_PORT, not
+      # by the Vite dev server on 5174.
+      CORS_ORIGINS: ${CORS_ORIGINS_DOCKER:-http://localhost:${WEB_PORT:-8080},http://127.0.0.1:${WEB_PORT:-8080}}
+      CLIENT_URL: ${CLIENT_URL_DOCKER:-http://localhost:${WEB_PORT:-8080}}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
+      STORAGE_LOCAL_ROOT: /app/storage
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_PRESIGN_TTL: ${S3_PRESIGN_TTL:-900}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-25}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_SECURE: ${EMAIL_SECURE:-false}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+      EMAIL_FROM: ${EMAIL_FROM}
+      SLA_SWEEP_CRON: ${SLA_SWEEP_CRON:-*/5 * * * *}
+      NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-730}
+      EXPORT_RETENTION_DAYS: ${EXPORT_RETENTION_DAYS:-7}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - storagedata:/app/storage
+    networks: [collex-inq]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:'+(process.env.PORT||5100)+'/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: json-file
+      options: { max-size: '50m', max-file: '5' }
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: collex-inq-worker
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      # The API owns `migrate deploy`. The worker waits for it rather than
+      # racing it — two processes running migrations against one database is
+      # how you get a half-applied schema.
+      api: { condition: service_healthy }
+    environment:
+      <<: *api_env
+      # Tells the shared entrypoint to skip migrations and start worker.js.
+      ROLE: worker
+    volumes:
+      - storagedata:/app/storage
+    networks: [collex-inq]
+    logging:
+      driver: json-file
+      options: { max-size: '50m', max-file: '5' }
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    container_name: collex-inq-nginx
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_started }
+    ports:
+      - '${WEB_PORT:-8080}:80'
+    networks: [collex-inq]
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '3' }
+
+networks:
+  collex-inq:
+    driver: bridge
+
+volumes:
+  pgdata:
+  storagedata:

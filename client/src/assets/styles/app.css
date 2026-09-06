@@ -1,0 +1,429 @@
+/*
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Application styles.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  EVERY DIRECTIONAL RULE USES LOGICAL PROPERTIES. `margin-inline-start`, not
+ *  `margin-left`; `border-inline-end`, not `border-right`; `inset-inline-start`,
+ *  not `left`. The layout genuinely flips between Arabic and English, so a
+ *  physical property is a bug that only shows up in one of the two languages —
+ *  and only to the people who read that one.
+ *
+ *  Bootstrap handles its own half through the RTL build, which `i18n/index.js`
+ *  swaps in. This file covers what Bootstrap does not.
+ */
+
+:root {
+  --ci-sidebar-width: 260px;
+  --ci-header-height: 52px;
+}
+
+body {
+  /* A font stack that has real Arabic coverage on every platform this runs on.
+     Without Segoe UI / Tahoma first on Windows, Arabic falls back to a face
+     with no proper shaping and the text renders disconnected. */
+  font-family:
+    'Segoe UI', Tahoma, 'Noto Naskh Arabic', 'Helvetica Neue', Arial,
+    sans-serif;
+  font-size: 0.925rem;
+}
+
+/* Numerals stay Latin even in Arabic. Egyptian banking and collections work
+   is done in Latin digits — a case number in Arabic-Indic numerals is harder
+   to read aloud down a phone line, which is what these are for. */
+[dir='rtl'] {
+  font-variant-numeric: lining-nums;
+}
+
+/* ─── Layout ─────────────────────────────────────────────────────────────── */
+
+.min-vw-0 {
+  min-width: 0;
+}
+
+/* Long values — case numbers, national ids, addresses — must not stretch a
+   table cell until the layout scrolls sideways. */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Tables ─────────────────────────────────────────────────────────────── */
+
+.table > :not(caption) > * > * {
+  padding: 0.55rem 0.6rem;
+}
+
+.table thead th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+  white-space: nowrap;
+  border-block-end-width: 1px;
+}
+
+/* Monospace for identifiers, so a mistyped digit in a case number is visible.
+   `direction: ltr` because these are always read left to right even inside an
+   Arabic page. */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.85em;
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
+
+/* ─── Cards and stat tiles ───────────────────────────────────────────────── */
+
+.stat-card {
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-body-bg);
+  padding: 0.9rem 1rem;
+  height: 100%;
+}
+
+.stat-card__label {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.15rem;
+}
+
+.stat-card__value {
+  font-size: 1.6rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.stat-card__hint {
+  font-size: 0.75rem;
+  color: var(--bs-tertiary-color);
+}
+
+/* ─── Page header ────────────────────────────────────────────────────────── */
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.page-header h1 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.page-header .subtitle {
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  margin: 0.1rem 0 0;
+}
+
+/* ─── Navigation ─────────────────────────────────────────────────────────── */
+
+.nav-pills .nav-link {
+  border-radius: var(--bs-border-radius);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.88rem;
+}
+
+.nav-pills .nav-link:not(.active):hover {
+  background-color: var(--bs-tertiary-bg);
+}
+
+/* ─── Sidebar navigation ─────────────────────────────────────────────────── */
+/*
+ * The sidebar previously had no styles of its own, so an active link fell
+ * through to Bootstrap's `.nav-link.active` — a solid primary fill. On a
+ * top-level item that reads fine; on nine stacked filters it is a wall of
+ * blue, and a wall of blue tells you nothing about which one you are on.
+ *
+ * So: weight instead of fill. The current item gets a tinted background, the
+ * brand colour on its text, and a bar on the leading edge. That bar is what
+ * the eye actually finds when scanning a list, and it costs no contrast.
+ */
+
+/*
+ * SPECIFICITY NOTE.
+ *
+ * Every override below carries `.nav-link` as well as its own class, giving
+ * (0,4,0) against Bootstrap's (0,3,0) `.nav-pills .nav-link.active`. That is
+ * deliberate and not merely defensive.
+ *
+ * `i18n/index.js` inserts Bootstrap as a single <link> PREPENDED to <head>,
+ * so it currently sits before this file and ordinary specificity would be
+ * enough. But the direction switcher owns that ordering, and an earlier
+ * version of it injected Bootstrap AFTER this stylesheet — at which point
+ * these rules lost every tie and the sidebar silently fell back to Bootstrap's
+ * solid-blue pill. Winning on specificity rather than on load order means this
+ * file does not depend on a decision made in another one.
+ *
+ * Do not "simplify" the selectors back. The failure mode is silent: it looks
+ * exactly like the rule was never written.
+ */
+
+.sidebar-nav .nav-link {
+  border-radius: var(--bs-border-radius);
+  padding-block: 0.4rem;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.sidebar-nav .nav-link.nav-link:hover {
+  background-color: var(--bs-tertiary-bg);
+  color: var(--bs-emphasis-color);
+}
+
+/* Sub-items: the filters under a section. */
+.sidebar-nav .nav-sub {
+  position: relative;
+  border-radius: var(--bs-border-radius-sm);
+}
+
+.sidebar-nav .nav-link.nav-sub.active {
+  /* A tint of the brand colour, not the brand colour. */
+  background-color: rgba(var(--bs-primary-rgb), 0.1);
+  color: var(--bs-primary) !important;
+  font-weight: 600;
+}
+
+.sidebar-nav .nav-link.nav-sub.active::before {
+  content: '';
+  position: absolute;
+  /* Logical: the marker sits on the leading edge in both directions. */
+  inset-inline-start: -0.55rem;
+  inset-block: 0.15rem;
+  inline-size: 2px;
+  border-radius: 2px;
+  background-color: var(--bs-primary);
+}
+
+/* A section header whose own page is open. */
+.sidebar-nav .nav-link.nav-section.active {
+  background-color: rgba(var(--bs-primary-rgb), 0.1);
+  color: var(--bs-primary) !important;
+  font-weight: 600;
+}
+
+/* The count beside a filter. Muted until that filter is the current one —
+   a row of loud badges competes with the item the user is actually on. */
+.sidebar-nav .nav-sub .badge {
+  font-weight: 600;
+  font-size: 0.7rem;
+  min-inline-size: 1.35rem;
+}
+
+.sidebar-nav .nav-link.nav-sub:not(.active) .badge.text-bg-secondary {
+  background-color: var(--bs-tertiary-bg) !important;
+  color: var(--bs-secondary-color) !important;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────── */
+/*
+ * Bootstrap's defaults are already close. Three small corrections: a slightly
+ * firmer label so a button reads as an action rather than as text, a focus
+ * ring that is visible without being a glow, and no movement on :active —
+ * a button that shifts under the cursor feels unstable on a dense screen.
+ */
+
+.btn {
+  font-weight: 500;
+  --bs-btn-focus-box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.25);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--bs-btn-focus-box-shadow);
+}
+
+.btn-sm {
+  --bs-btn-padding-y: 0.28rem;
+  --bs-btn-padding-x: 0.6rem;
+}
+
+/* A quiet outline button should read as quiet until it is hovered. */
+.btn-outline-secondary {
+  --bs-btn-color: var(--bs-secondary-color);
+  --bs-btn-border-color: var(--bs-border-color);
+}
+
+.btn-outline-secondary:hover {
+  --bs-btn-hover-bg: var(--bs-tertiary-bg);
+  --bs-btn-hover-border-color: var(--bs-secondary-border-subtle);
+  --bs-btn-hover-color: var(--bs-emphasis-color);
+}
+
+/* Icon-only buttons should be square, not the width of their padding. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  padding: 0;
+}
+
+/* ─── Timeline ───────────────────────────────────────────────────────────── */
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  /* Logical: the rail sits on the leading edge in both directions. */
+  padding-inline-start: 1.35rem;
+  border-inline-start: 2px solid var(--bs-border-color);
+}
+
+.timeline__item {
+  position: relative;
+  padding-block-end: 1.1rem;
+}
+
+.timeline__item::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: calc(-1.35rem - 5px);
+  inset-block-start: 0.35rem;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bs-primary);
+  box-shadow: 0 0 0 3px var(--bs-body-bg);
+}
+
+.timeline__item--muted::before {
+  background: var(--bs-secondary-color);
+}
+
+/* ─── Evidence grid ──────────────────────────────────────────────────────── */
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+
+.evidence-tile img {
+  width: 100%;
+  height: 130px;
+  object-fit: cover;
+  border-radius: var(--bs-border-radius);
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+}
+
+/* ─── Import wizard ──────────────────────────────────────────────────────── */
+
+.wizard-steps {
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.25rem;
+  flex-wrap: wrap;
+}
+
+.wizard-steps li {
+  flex: 1 1 140px;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-tertiary-bg);
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  /* The leading edge again, so the active marker is on the correct side. */
+  border-inline-start: 3px solid transparent;
+}
+
+.wizard-steps li.active {
+  background: var(--bs-body-bg);
+  border-inline-start-color: var(--bs-primary);
+  color: var(--bs-body-color);
+  font-weight: 600;
+}
+
+.wizard-steps li.done {
+  color: var(--bs-success);
+}
+
+.dropzone {
+  border: 2px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 2.25rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropzone:hover,
+.dropzone.dragging {
+  border-color: var(--bs-primary);
+  background: var(--bs-tertiary-bg);
+}
+
+/* A cell the import validator flagged. Coloured AND marked with a border, so
+   it is distinguishable without relying on colour alone. */
+.cell-error {
+  background: var(--bs-danger-bg-subtle);
+  border-inline-start: 3px solid var(--bs-danger);
+}
+
+.cell-warning {
+  background: var(--bs-warning-bg-subtle);
+  border-inline-start: 3px solid var(--bs-warning);
+}
+
+/* ─── Form builder ───────────────────────────────────────────────────────── */
+
+.builder-field {
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.65rem 0.8rem;
+  background: var(--bs-body-bg);
+}
+
+.builder-field:hover {
+  border-color: var(--bs-primary-border-subtle);
+}
+
+.builder-field.selected {
+  border-color: var(--bs-primary);
+  box-shadow: 0 0 0 2px var(--bs-primary-bg-subtle);
+}
+
+/* ─── Live map ───────────────────────────────────────────────────────────── */
+
+.map-canvas {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  background: var(--bs-tertiary-bg);
+  border-radius: var(--bs-border-radius);
+  overflow: hidden;
+}
+
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  cursor: pointer;
+}
+
+/* ─── Print ──────────────────────────────────────────────────────────────── */
+
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+}

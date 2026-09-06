@@ -1,0 +1,1949 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  Collex Inquiries — Field Investigation Management System
+//  Prisma schema
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  Conventions enforced throughout this file:
+//
+//  1. TENANCY. Every tenant-owned model carries `tenantId` with an index and a
+//     cascading FK to `Tenant`. The safety net in `prisma/tenant-guard.ts`
+//     relies on that column being named exactly `tenantId` — a model that
+//     spells it differently is invisible to the guard and leaks.
+//
+//  2. LANGUAGE-INDEPENDENT IDENTIFIERS. Anything a human configures carries a
+//     stable `code` (RESIDENCE, CREDIT_CARD) plus `nameAr`/`nameEn` for
+//     display. Business logic branches on `code`, never on a display name, so
+//     renaming a product in Arabic cannot change what the system does.
+//
+//  3. MONEY is Decimal(14,2). Prisma hands these back as Decimal objects, not
+//     numbers — convert explicitly before arithmetic or JSON serialization.
+//
+//  4. NO BINARY IN POSTGRES. Files live in object storage; `MediaAsset` holds
+//     only the metadata and the storage key.
+// ═══════════════════════════════════════════════════════════════════════════
+
+generator client {
+  provider        = "prisma-client-js"
+  // Lets the datasource block declare `extensions`, so Prisma creates pg_trgm
+  // in migrations AND in the shadow database. Without it, `migrate dev` fails
+  // with `operator class "gin_trgm_ops" does not exist` when it replays the
+  // migration into a shadow database that has no extension.
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Backs the GIN trigram indexes on customer name / mobile / national id and
+  // on case and application numbers — see the `@@index(... gin_trgm_ops)`
+  // declarations on `Customer` and `Investigation`.
+  extensions = [pg_trgm]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TENANCY
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  TRIAL
+}
+
+/// A customer company of the platform. Everything else in the system hangs off
+/// one of these; `Tenant` itself is the only model with no `tenantId`.
+model Tenant {
+  id     String       @id @default(uuid())
+  /// Short stable handle used in URLs, exports and support conversations.
+  code   String       @unique
+  nameAr String
+  nameEn String
+  status TenantStatus @default(TRIAL)
+
+  logoUrl       String?
+  primaryColor  String?
+  taxId         String?
+  phone         String?
+  email         String?
+  addressLine   String?
+  /// Default locale for generated documents when no user preference applies.
+  defaultLocale String  @default("ar")
+  timezone      String  @default("Africa/Cairo")
+
+  subscriptionStart DateTime?
+  subscriptionEnd   DateTime?
+  maxWebUsers       Int       @default(50)
+  maxInvestigators  Int       @default(200)
+
+  /// Company-wide feature gates. These override user permissions in one
+  /// direction only: a feature switched off here cannot be re-enabled by a
+  /// role, but switching it on does not grant anybody the permission.
+  featureFlags Json @default("{}")
+  settings     Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  investigators      Investigator[]
+  roles              Role[]
+  customers          Customer[]
+  investigations     Investigation[]
+  products           Product[]
+  investigationTypes InvestigationType[]
+  formTemplates      FormTemplate[]
+  importBatches      ImportBatch[]
+  importMappings     ImportMappingTemplate[]
+  mediaAssets        MediaAsset[]
+  gpsEvents          GpsEvent[]
+  qcReviews          QcReview[]
+  reports            Report[]
+  reportTemplates    ReportTemplate[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  slaPolicies        SlaPolicy[]
+  escalationRules    EscalationRule[]
+  rejectionReasons   QcRejectionReason[]
+  mediaCategories    MediaCategory[]
+  exportJobs         ExportJob[]
+  assignments        Assignment[]
+  clients            ClientAccount[]
+
+  @@index([status])
+  @@map("tenants")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  IDENTITY — web users and field investigators are deliberately separate
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING
+  LOCKED
+}
+
+/// Which table a JWT `sub` points at. Web users and investigators share the
+/// token format and the refresh-rotation machinery but never the row space, so
+/// every principal-aware code path has to say which one it means.
+enum PrincipalType {
+  WEB_USER
+  INVESTIGATOR
+}
+
+/// A back-office user of the web platform: coordinator, supervisor, QC officer,
+/// admin. NOT a field investigator — see `Investigator`.
+model User {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  email        String
+  passwordHash String
+  fullName     String
+  phone        String?
+  employeeCode String?
+  avatarUrl    String?
+  status       UserStatus @default(ACTIVE)
+  locale       String     @default("ar")
+
+  /// The user's assigned role. Effective permissions resolve from the role's
+  /// grants plus this user's own overrides — see `UserPermissionOverride`.
+  roleId String?
+  role   Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  /// A platform-operator account. Exempt from tenant scoping, subscription
+  /// expiry and permission checks. There is deliberately no API that can set
+  /// this — it is granted by the seeder or by hand.
+  isSuperAdmin Boolean @default(false)
+
+  branch     String?
+  department String?
+
+  /// Geographic confinement. Empty means the whole tenant; otherwise the user
+  /// only sees investigations whose governorate is in this list.
+  allowedGovernorateIds String[] @default([])
+
+  mfaEnabled   Boolean @default(false)
+  mfaSecretEnc String?
+
+  lastLoginAt       DateTime?
+  lastLoginIp       String?
+  failedLogins      Int       @default(0)
+  lockedUntil       DateTime?
+  passwordChangedAt DateTime?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  sessions            Session[]
+  permissionOverrides UserPermissionOverride[]
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+  coordinatedCases    Investigation[]          @relation("CoordinatorInvestigations")
+  createdCases        Investigation[]          @relation("CaseCreatedBy")
+  assignmentsMade     Assignment[]             @relation("AssignmentAssignedBy")
+  qcReviews           QcReview[]
+  importBatches       ImportBatch[]
+  uploadedMedia       MediaAsset[]
+  exportJobs          ExportJob[]
+  reports             Report[]
+  clientAccount       ClientAccount?
+
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@index([tenantId, roleId])
+  @@index([email])
+  @@map("users")
+}
+
+enum InvestigatorStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  IN_TRAINING
+}
+
+/// Where the investigator is right now, for the live map and the assignment
+/// engine. Distinct from `InvestigatorStatus`, which is an employment state.
+enum InvestigatorAvailability {
+  OFFLINE
+  ONLINE
+  AVAILABLE
+  BUSY
+  ON_VISIT
+  EN_ROUTE
+  ON_LEAVE
+}
+
+/// A field investigator. Authenticates through the same token machinery as a
+/// web user but from its own table: the two are different populations with
+/// different lifecycles, and merging them would put a mobile credential in the
+/// same row space as a back-office one.
+///
+/// The future mobile application authenticates as one of these.
+model Investigator {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  employeeCode String
+  fullName     String
+  email        String?
+  phone        String
+  passwordHash String
+  nationalId   String?
+  avatarUrl    String?
+  locale       String  @default("ar")
+
+  status       InvestigatorStatus       @default(IN_TRAINING)
+  availability InvestigatorAvailability @default(OFFLINE)
+
+  /// Coverage. Stored as id arrays rather than join tables because the whole
+  /// list is read together on every assignment decision and is never queried
+  /// from the other side.
+  governorateIds String[] @default([])
+  cityIds        String[] @default([])
+  districtIds    String[] @default([])
+  areaIds        String[] @default([])
+
+  /// Which investigation types and products this person is qualified for.
+  investigationTypeIds String[] @default([])
+  productIds           String[] @default([])
+  skills               String[] @default([])
+
+  /// Operational ceiling used by the workload check on assignment.
+  maxDailyCases Int @default(15)
+  maxOpenCases  Int @default(30)
+
+  /// Rolling performance figures, recomputed by the analytics job. Denormalised
+  /// on purpose: the assignment screen ranks investigators by these and cannot
+  /// afford an aggregate query per row.
+  qualityScore   Decimal? @db.Decimal(5, 2)
+  avgTatMinutes  Int?
+  completedCount Int      @default(0)
+  rejectedCount  Int      @default(0)
+  slaBreachCount Int      @default(0)
+
+  trainingCompletedAt DateTime?
+  contractEndsAt      DateTime?
+
+  /// Last known position. Written only while the investigator is on shift and
+  /// only when the tenant has location tracking enabled.
+  lastLat        Decimal?  @db.Decimal(10, 7)
+  lastLng        Decimal?  @db.Decimal(10, 7)
+  lastLocationAt DateTime?
+  lastActivityAt DateTime?
+
+  deviceId       String?
+  deviceModel    String?
+  devicePlatform String?
+  pushToken      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  sessions       Session[]
+  assignments    Assignment[]
+  investigations Investigation[]        @relation("InvestigatorInvestigations")
+  gpsEvents      GpsEvent[]
+  documents      InvestigatorDocument[]
+  notifications  Notification[]
+
+  @@unique([tenantId, employeeCode])
+  @@index([tenantId, status])
+  @@index([tenantId, availability])
+  @@index([tenantId, phone])
+  @@map("investigators")
+}
+
+model InvestigatorDocument {
+  id             String       @id @default(uuid())
+  tenantId       String
+  investigatorId String
+  investigator   Investigator @relation(fields: [investigatorId], references: [id], onDelete: Cascade)
+
+  kind       String
+  storageKey String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, investigatorId])
+  @@map("investigator_documents")
+}
+
+/// One live login. Refresh tokens rotate on every use and only the hash is
+/// stored, so a database read cannot mint a session. Revoking is a row update,
+/// which makes "log out everywhere" a single `updateMany`.
+model Session {
+  id            String        @id @default(uuid())
+  tenantId      String
+  principalType PrincipalType
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  investigatorId String?
+  investigator   Investigator? @relation(fields: [investigatorId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 of the refresh token. The plaintext exists only on the client.
+  refreshTokenHash String    @unique
+  /// Set when this session's refresh token has been exchanged. A second use of
+  /// an already-rotated token is treated as theft and kills the whole family.
+  rotatedAt        DateTime?
+  familyId         String
+
+  userAgent String?
+  ip        String?
+  device    String?
+
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  lastUsedAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, investigatorId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Access-token denylist. An access token is short-lived but not instantly
+/// revocable on its own; putting its `jti` here closes the window on logout,
+/// suspension and password change.
+model RevokedToken {
+  jti         String   @id
+  principalId String
+  expiresAt   DateTime
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RBAC
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The permission catalogue. Global rather than per-tenant: a permission is a
+/// property of the software, and letting tenants invent codes would put strings
+/// the backend has never heard of into role grants.
+model Permission {
+  code          String  @id
+  category      String
+  labelAr       String
+  labelEn       String
+  descriptionAr String?
+  descriptionEn String?
+  /// Ordering for the permission matrix UI.
+  sortOrder     Int     @default(0)
+
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
+
+  @@index([category])
+  @@map("permissions")
+}
+
+/// A named bundle of permissions inside one tenant.
+///
+/// `isSystem` roles are created by the seeder and cannot be deleted or have
+/// their `code` changed, because the seeder and the docs refer to them by code.
+/// Their grants stay editable — a tenant whose coordinators should also approve
+/// QC must not have to clone the role to say so.
+model Role {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  nameAr      String
+  nameEn      String
+  description String?
+  isSystem    Boolean @default(false)
+  /// Rank guards the "who may act on whom" rule: a user can only edit, disable
+  /// or re-role somebody strictly below them.
+  rank        Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId         String
+  role           Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionCode String
+  permission     Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([roleId, permissionCode])
+  @@index([permissionCode])
+  @@map("role_permissions")
+}
+
+/// Per-user deviation from the role. `granted = false` is a deny and beats the
+/// role grant, so one user can be excluded from something their whole role may
+/// do without inventing a near-duplicate role for them.
+model UserPermissionOverride {
+  userId         String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissionCode String
+  permission     Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+  granted        Boolean
+
+  @@id([userId, permissionCode])
+  @@map("user_permission_overrides")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  GEOGRAPHY — a shared catalogue, not tenant data
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Egypt's administrative hierarchy, seeded once and shared by every tenant.
+/// Deliberately not tenant-scoped: two tenants working the same city must agree
+/// on what that city is, or coverage matching and the live map disagree.
+model Governorate {
+  id     String @id @default(uuid())
+  code   String @unique
+  nameAr String
+  nameEn String
+
+  cities         City[]
+  customers      Customer[]
+  investigations Investigation[]
+
+  @@map("governorates")
+}
+
+model City {
+  id            String      @id @default(uuid())
+  governorateId String
+  governorate   Governorate @relation(fields: [governorateId], references: [id], onDelete: Cascade)
+  code          String
+  nameAr        String
+  nameEn        String
+
+  districts      District[]
+  customers      Customer[]
+  investigations Investigation[]
+
+  @@unique([governorateId, code])
+  @@index([governorateId])
+  @@map("cities")
+}
+
+model District {
+  id     String @id @default(uuid())
+  cityId String
+  city   City   @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  code   String
+  nameAr String
+  nameEn String
+
+  areas          Area[]
+  customers      Customer[]
+  investigations Investigation[]
+
+  @@unique([cityId, code])
+  @@index([cityId])
+  @@map("districts")
+}
+
+model Area {
+  id         String   @id @default(uuid())
+  districtId String
+  district   District @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  code       String
+  nameAr     String
+  nameEn     String
+
+  customers      Customer[]
+  investigations Investigation[]
+
+  @@unique([districtId, code])
+  @@index([districtId])
+  @@map("areas")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CONFIGURATION — products, investigation types, SLA, escalation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A financing product. Configurable per tenant; nothing in the codebase
+/// branches on a product name.
+model Product {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  nameAr      String
+  nameEn      String
+  description String?
+  isActive    Boolean @default(true)
+
+  /// Default SLA in hours when the product/type pairing carries none.
+  defaultSlaHours Int      @default(48)
+  defaultPriority Priority @default(NORMAL)
+  price           Decimal? @db.Decimal(14, 2)
+
+  /// Extra required fields beyond the base case shape, as an array of field
+  /// keys. Enforced by the import validator and the manual-entry DTO.
+  requiredFields    String[] @default([])
+  requiredDocuments String[] @default([])
+  requiredPhotos    String[] @default([])
+
+  reportTemplateId String?
+  reportTemplate   ReportTemplate? @relation(fields: [reportTemplateId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investigationTypes ProductInvestigationType[]
+  investigations     Investigation[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("products")
+}
+
+/// A kind of field verification — RESIDENCE, WORKPLACE, KYC. Configurable, so
+/// new ones need no deploy.
+model InvestigationType {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  nameAr      String
+  nameEn      String
+  description String?
+  isActive    Boolean @default(true)
+  colorHex    String?
+  icon        String?
+
+  defaultSlaHours Int @default(48)
+
+  /// The form this type collects in the field. Points at the template, not a
+  /// version — a case pins the version at assignment time.
+  formTemplateId String?
+  formTemplate   FormTemplate? @relation(fields: [formTemplateId], references: [id], onDelete: SetNull)
+
+  reportTemplateId String?
+  reportTemplate   ReportTemplate? @relation(fields: [reportTemplateId], references: [id], onDelete: SetNull)
+
+  requiredPhotoCategories String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products       ProductInvestigationType[]
+  investigations Investigation[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("investigation_types")
+}
+
+/// Which investigation types a product allows, and what they cost and promise
+/// for that pairing. A row here is what makes "Credit Card + Residence" a valid
+/// case to create.
+model ProductInvestigationType {
+  productId           String
+  product             Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  investigationTypeId String
+  investigationType   InvestigationType @relation(fields: [investigationTypeId], references: [id], onDelete: Cascade)
+
+  slaHours Int?
+  price    Decimal? @db.Decimal(14, 2)
+  isActive Boolean  @default(true)
+
+  @@id([productId, investigationTypeId])
+  @@index([investigationTypeId])
+  @@map("product_investigation_types")
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Named SLA rules. Resolution order is most specific first: a policy naming
+/// both product and type beats one naming only the product, which beats the
+/// tenant default.
+model SlaPolicy {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code   String
+  nameAr String
+  nameEn String
+
+  productId           String?
+  investigationTypeId String?
+  priority            Priority?
+
+  /// Whole-case budget, and the per-stage budgets that make up the TAT report.
+  totalHours      Int
+  assignmentHours Int @default(4)
+  acceptanceHours Int @default(2)
+  fieldHours      Int @default(24)
+  qcHours         Int @default(12)
+
+  /// Fraction of the budget at which the case turns YELLOW. 0.8 = warn at 80%.
+  warnAtPercent Int @default(80)
+
+  /// Whether the clock stops outside working hours.
+  businessHoursOnly Boolean @default(false)
+  workdayStartHour  Int     @default(9)
+  workdayEndHour    Int     @default(17)
+  /// ISO weekday numbers that count as working days (1 = Monday).
+  workdays          Int[]   @default([7, 1, 2, 3, 4])
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investigations Investigation[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("sla_policies")
+}
+
+enum EscalationTrigger {
+  NOT_ACCEPTED
+  NOT_STARTED
+  SLA_WARNING
+  SLA_BREACH
+  QC_PENDING_TOO_LONG
+  REWORK_OVERDUE
+}
+
+/// Configurable escalation. There are no hard-coded time values anywhere in the
+/// escalation sweep — every threshold is a row here.
+model EscalationRule {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code    String
+  nameAr  String
+  nameEn  String
+  trigger EscalationTrigger
+
+  /// Minutes after the triggering moment before this rule fires.
+  thresholdMinutes Int
+  /// Fired at most once per case per rule unless this is set.
+  repeatEveryMinutes Int?
+
+  /// Who hears about it. Role codes rather than user ids, so staff changes do
+  /// not silently orphan a rule.
+  notifyRoleCodes    String[] @default([])
+  notifyCoordinator  Boolean  @default(true)
+  notifyInvestigator Boolean  @default(false)
+
+  priority Priority?
+  isActive Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events EscalationEvent[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("escalation_rules")
+}
+
+/// One firing of one rule against one case. Its unique constraint is what makes
+/// a non-repeating rule fire once: the sweep inserts and lets the database
+/// reject the duplicate rather than reading first and racing itself.
+model EscalationEvent {
+  id     String @id @default(uuid())
+  ruleId String
+  rule   EscalationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  tenantId        String
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  /// Bucket index for repeating rules; always 0 for one-shot rules, which is
+  /// what makes the unique constraint below do the deduplication.
+  occurrence Int      @default(0)
+  firedAt    DateTime @default(now())
+
+  @@unique([ruleId, investigationId, occurrence])
+  @@index([tenantId, investigationId])
+  @@map("escalation_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CUSTOMERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A person investigated one or more times. Identity lives here exactly once;
+/// a repeat request against the same national id reuses this row rather than
+/// copying the name and phone onto a second case.
+model Customer {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  fullName   String
+  nationalId String?
+  mobile     String?
+  altMobile  String?
+  homePhone  String?
+  email      String?
+  dateOfBirth DateTime?
+
+  /// Residence
+  residenceAddress String?
+  governorateId    String?
+  governorate      Governorate? @relation(fields: [governorateId], references: [id], onDelete: SetNull)
+  cityId           String?
+  city             City?        @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  districtId       String?
+  district         District?    @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  areaId           String?
+  area             Area?        @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  residenceLat     Decimal?     @db.Decimal(10, 7)
+  residenceLng     Decimal?     @db.Decimal(10, 7)
+
+  /// Workplace
+  workplaceName    String?
+  workplacePhone   String?
+  workplaceAddress String?
+  jobTitle         String?
+
+  /// Anything the source file carried that maps to no column. Kept so an import
+  /// never silently drops a bank's data.
+  additionalData Json?
+
+  notes String?
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  investigations Investigation[]
+  mediaAssets    MediaAsset[]
+
+  @@unique([tenantId, nationalId])
+  @@index([tenantId, mobile])
+  @@index([tenantId, fullName])
+  @@index([tenantId, governorateId])
+  @@index([tenantId, createdAt])
+  // Trigram indexes back the `contains` searches on the customer lookup and
+  // the global search bar. Without them an ILIKE '%term%' over a few hundred
+  // thousand customers is a sequential scan on every keystroke — which is
+  // exactly the shape of query a search box produces.
+  @@index([fullName(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([mobile(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([nationalId(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  INVESTIGATIONS — the centre of the system
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The case lifecycle. Transitions are checked against the table in
+/// `investigations/case-status.machine.ts`; nothing sets this column directly
+/// from a request body.
+enum InvestigationStatus {
+  NEW
+  VALIDATING
+  READY_FOR_ASSIGNMENT
+  ASSIGNED
+  ACCEPTED
+  EN_ROUTE
+  ON_SITE
+  IN_PROGRESS
+  SUBMITTED
+  AUTO_VALIDATION
+  QC_PENDING
+  QC_APPROVED
+  QC_REJECTED
+  REWORK
+  REPORT_GENERATION
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+/// Where the case stands against its SLA budget. Derived on read from the
+/// timestamps and the policy — never stored, so a badge cannot disagree with
+/// the data it describes.
+enum SlaState {
+  GREEN
+  YELLOW
+  RED
+  MET
+  BREACHED
+  NOT_APPLICABLE
+}
+
+enum InvestigationSource {
+  EXCEL_IMPORT
+  API
+  MANUAL
+  CLIENT_PORTAL
+}
+
+/// The final verdict the investigator reached, independent of whether QC
+/// accepted the work. A case can be QC_APPROVED with a NEGATIVE result.
+enum InvestigationResult {
+  POSITIVE
+  NEGATIVE
+  PARTIAL
+  NOT_FOUND
+  REFUSED
+  UNREACHABLE
+}
+
+model Investigation {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Human-facing reference, unique per tenant. Generated by the case-number
+  /// service, never supplied by a client.
+  caseNumber        String
+  /// The client's own reference for the underlying application.
+  applicationNumber String?
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  productId           String
+  product             Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  investigationTypeId String
+  investigationType   InvestigationType @relation(fields: [investigationTypeId], references: [id], onDelete: Restrict)
+
+  status   InvestigationStatus @default(NEW)
+  priority Priority            @default(NORMAL)
+  source   InvestigationSource @default(MANUAL)
+  result   InvestigationResult?
+
+  /// Where the visit happens. Copied from the customer at creation but editable
+  /// on the case: the address to verify is a property of this request, and a
+  /// later case for the same person may have a different one.
+  addressLine   String?
+  governorateId String?
+  governorate   Governorate? @relation(fields: [governorateId], references: [id], onDelete: SetNull)
+  cityId        String?
+  city          City?        @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  districtId    String?
+  district      District?    @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  areaId        String?
+  area          Area?        @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  targetLat     Decimal?     @db.Decimal(10, 7)
+  targetLng     Decimal?     @db.Decimal(10, 7)
+
+  coordinatorId String?
+  coordinator   User?   @relation("CoordinatorInvestigations", fields: [coordinatorId], references: [id], onDelete: SetNull)
+
+  investigatorId String?
+  investigator   Investigator? @relation("InvestigatorInvestigations", fields: [investigatorId], references: [id], onDelete: SetNull)
+
+  slaPolicyId String?
+  slaPolicy   SlaPolicy? @relation(fields: [slaPolicyId], references: [id], onDelete: SetNull)
+  dueAt       DateTime?
+
+  /// The form version pinned to this case. Set when the case is first assigned
+  /// so that editing the template afterwards cannot alter historical answers.
+  formVersionId String?
+  formVersion   FormVersion? @relation(fields: [formVersionId], references: [id], onDelete: SetNull)
+
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+
+  /// Lifecycle stamps. Every one of these is written by the status machine, and
+  /// the TAT report is computed from them rather than from a stored duration.
+  assignedAt  DateTime?
+  acceptedAt  DateTime?
+  startedAt   DateTime?
+  onSiteAt    DateTime?
+  submittedAt DateTime?
+  qcAt        DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  archivedAt  DateTime?
+
+  /// How many times this case has come back from QC. Denormalised because the
+  /// rework list sorts on it.
+  reworkCount Int @default(0)
+
+  cancelReason String?
+  notes        String?
+  /// Unmapped columns from the source file.
+  additionalData Json?
+
+  createdById String?
+  createdBy   User?   @relation("CaseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  statusHistory    InvestigationStatusHistory[]
+  assignments      Assignment[]
+  formSubmissions  FormSubmission[]
+  mediaAssets      MediaAsset[]
+  gpsEvents        GpsEvent[]
+  qcReviews        QcReview[]
+  reports          Report[]
+  comments         InvestigationComment[]
+  escalationEvents EscalationEvent[]
+
+  @@unique([tenantId, caseNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, investigatorId, status])
+  @@index([tenantId, coordinatorId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, productId])
+  @@index([tenantId, investigationTypeId])
+  @@index([tenantId, governorateId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, dueAt])
+  @@index([tenantId, applicationNumber])
+  @@index([tenantId, importBatchId])
+  // Same reasoning as Customer: the case list's search box matches partial
+  // case and application numbers.
+  @@index([caseNumber(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([applicationNumber(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("investigations")
+}
+
+/// Append-only status log. One row per transition, with who caused it — this is
+/// what the case timeline renders.
+model InvestigationStatusHistory {
+  id              String        @id @default(uuid())
+  tenantId        String
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  fromStatus InvestigationStatus?
+  toStatus   InvestigationStatus
+
+  actorType PrincipalType?
+  actorId   String?
+  actorName String?
+
+  reason   String?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, investigationId, createdAt])
+  @@map("investigation_status_history")
+}
+
+/// A note on a case. Coordinators and investigators both write here; `isInternal`
+/// keeps a coordinator's private remark off the investigator's screen.
+model InvestigationComment {
+  id              String        @id @default(uuid())
+  tenantId        String
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  authorType PrincipalType
+  authorId   String
+  authorName String
+
+  body       String
+  isInternal Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, investigationId, createdAt])
+  @@map("investigation_comments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ASSIGNMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  REASSIGNED
+  COMPLETED
+  EXPIRED
+}
+
+enum AssignmentMethod {
+  MANUAL
+  BULK
+  AUTO
+  REASSIGN
+}
+
+/// One offer of one case to one investigator. Reassignment closes the old row
+/// and opens a new one rather than editing in place, so the assignment history
+/// on a case is the list of these rows in order.
+model Assignment {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  investigatorId String
+  investigator   Investigator @relation(fields: [investigatorId], references: [id], onDelete: Restrict)
+
+  assignedById String?
+  assignedBy   User?   @relation("AssignmentAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  status AssignmentStatus @default(PENDING)
+  method AssignmentMethod @default(MANUAL)
+
+  /// Set on the row this one replaced, so the chain is walkable in both
+  /// directions without a self-join on timestamps.
+  previousAssignmentId String?  @unique
+  reassignReason       String?
+  rejectReason         String?
+
+  /// When the offer lapses if the investigator has not accepted. Written from
+  /// the SLA policy at assignment time.
+  expiresAt  DateTime?
+  assignedAt DateTime  @default(now())
+  respondedAt DateTime?
+  closedAt   DateTime?
+
+  notes String?
+
+  @@index([tenantId, investigationId, assignedAt])
+  @@index([tenantId, investigatorId, status])
+  @@index([tenantId, status, expiresAt])
+  @@map("assignments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  DYNAMIC FORMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A form the field investigator fills in. The template is the stable identity;
+/// the schema lives on `FormVersion`, which is what a case pins.
+model FormTemplate {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  nameAr      String
+  nameEn      String
+  description String?
+  isActive    Boolean @default(true)
+
+  /// The version served to new assignments. Null until a version is published.
+  publishedVersionId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions           FormVersion[]
+  investigationTypes InvestigationType[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("form_templates")
+}
+
+/// One immutable published schema. Editing a published version is refused; the
+/// builder clones it to a new draft instead, which is what keeps a two-year-old
+/// investigation rendering exactly the questions it was actually asked.
+model FormVersion {
+  id         String       @id @default(uuid())
+  tenantId   String
+  templateId String
+  template   FormTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  version     Int
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
+
+  /// The field tree: sections, fields, options, validation and the conditional
+  /// rules. Shape is validated by `forms/form-schema.validator.ts` on publish.
+  schema Json
+
+  changeNote String?
+  createdById String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  submissions    FormSubmission[]
+  investigations Investigation[]
+
+  @@unique([templateId, version])
+  @@index([tenantId, templateId])
+  @@map("form_versions")
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  SUPERSEDED
+}
+
+/// The answers for one attempt at one case. A rework does not overwrite: the
+/// previous row is marked SUPERSEDED and a new one is written, so QC can always
+/// see what was originally submitted.
+model FormSubmission {
+  id              String        @id @default(uuid())
+  tenantId        String
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  formVersionId String
+  formVersion   FormVersion @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
+
+  /// 1 for the first submission, incremented on every resubmission.
+  attempt Int              @default(1)
+  status  SubmissionStatus @default(DRAFT)
+
+  /// Answers keyed by field key.
+  answers Json @default("{}")
+
+  /// What the automatic post-submission check found. Null until it has run.
+  autoValidation Json?
+
+  submittedByType PrincipalType?
+  submittedById   String?
+  submittedAt     DateTime?
+
+  /// Set by the mobile client so a retried upload is not counted twice.
+  clientSubmissionId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([investigationId, attempt])
+  @@unique([tenantId, clientSubmissionId])
+  @@index([tenantId, investigationId])
+  @@map("form_submissions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  IMPORT
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ImportBatchStatus {
+  UPLOADED
+  PARSING
+  PREVIEW_READY
+  CONFIRMED
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+  CANCELLED
+}
+
+enum ImportRowStatus {
+  VALID
+  INVALID
+  DUPLICATE
+  IMPORTED
+  SKIPPED
+  FAILED
+}
+
+/// One upload. Rows are staged in `ImportRow` and only become investigations
+/// when a human confirms the preview — nothing an uploader submits reaches the
+/// operational tables without that step.
+model ImportBatch {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  reference  String
+  fileName   String
+  storageKey String?
+  fileSize   Int?
+  sheetName  String?
+
+  status ImportBatchStatus @default(UPLOADED)
+
+  mappingTemplateId String?
+  mappingTemplate   ImportMappingTemplate? @relation(fields: [mappingTemplateId], references: [id], onDelete: SetNull)
+  /// The mapping actually used, frozen at upload. The template can change
+  /// later; what this batch did must not.
+  mappingUsed       Json?
+
+  /// Defaults applied to every row that does not carry its own value.
+  defaultProductId           String?
+  defaultInvestigationTypeId String?
+  defaultPriority            Priority?
+  defaultDueAt               DateTime?
+
+  totalRows     Int @default(0)
+  validRows     Int @default(0)
+  invalidRows   Int @default(0)
+  duplicateRows Int @default(0)
+  importedRows  Int @default(0)
+  failedRows    Int @default(0)
+
+  errorReportKey String?
+  errorSummary   Json?
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  uploadedAt  DateTime  @default(now())
+  parsedAt    DateTime?
+  confirmedAt DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rows           ImportRow[]
+  investigations Investigation[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId, status])
+  @@index([tenantId, uploadedAt])
+  @@map("import_batches")
+}
+
+/// One staged row. Holds the raw cells, the mapped values and whatever the
+/// validator said about it, so the preview screen can show the user their own
+/// spreadsheet with the problems marked in place.
+model ImportRow {
+  id       String      @id @default(uuid())
+  tenantId String
+  batchId  String
+  batch    ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  /// 1-based row number in the source sheet, header excluded.
+  rowNumber Int
+  status    ImportRowStatus @default(VALID)
+
+  rawData    Json
+  mappedData Json
+  /// [{ column, reason }] — what to render next to the offending cell.
+  errors     Json?
+  warnings   Json?
+
+  /// Ids of the existing rows this one might duplicate, with the rule that
+  /// matched. Populated by the duplicate pass.
+  duplicateOf Json?
+  /// What the user chose to do about the duplicate.
+  resolution  String?
+
+  createdInvestigationId String?
+  createdCustomerId      String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, rowNumber])
+  @@index([tenantId, batchId, status])
+  @@map("import_rows")
+}
+
+/// A saved Excel-column-to-system-field mapping, per client. What makes the
+/// second file from the same bank a one-click import.
+model ImportMappingTemplate {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  nameAr      String
+  nameEn      String
+  description String?
+
+  /// { systemField: sourceColumnHeader }
+  mapping Json
+
+  /// Per-field constants applied when the sheet has no column for them.
+  defaults Json?
+  /// Which duplicate rules to run for this client, by code.
+  duplicateRuleCodes String[] @default([])
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  batches ImportBatch[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("import_mapping_templates")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  MEDIA, DOCUMENTS, GPS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MediaType {
+  PHOTO
+  DOCUMENT
+  AUDIO
+  VIDEO
+  SIGNATURE
+}
+
+enum MediaStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  SCANNING
+  CLEAN
+  INFECTED
+  REJECTED
+}
+
+/// Configurable evidence categories — RESIDENCE_FRONT, ID_BACK, and whatever a
+/// tenant adds. Not an enum precisely because a new category must not need a
+/// migration.
+model MediaCategory {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code      String
+  nameAr    String
+  nameEn    String
+  mediaType MediaType @default(PHOTO)
+  /// Whether every case of the relevant type must carry one.
+  isRequired Boolean  @default(false)
+  minCount   Int      @default(0)
+  maxCount   Int?
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assets MediaAsset[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("media_categories")
+}
+
+/// Metadata for one stored file. The bytes are in object storage under
+/// `storageKey`; this row is the only thing the database holds.
+model MediaAsset {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  investigationId String?
+  investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  customerId      String?
+  customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  categoryId String?
+  category   MediaCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  mediaType MediaType
+  status    MediaStatus @default(PENDING_UPLOAD)
+
+  storageKey String  @unique
+  bucket     String?
+  fileName   String
+  mimeType   String
+  sizeBytes  Int     @default(0)
+  /// SHA-256 of the content, supplied by the uploader and used to spot a file
+  /// resubmitted under a new name.
+  checksum   String?
+
+  width       Int?
+  height      Int?
+  durationSec Int?
+
+  /// Where and when the evidence was actually captured, as reported by the
+  /// capturing device — distinct from when it was uploaded.
+  capturedAt  DateTime?
+  captureLat  Decimal?  @db.Decimal(10, 7)
+  captureLng  Decimal?  @db.Decimal(10, 7)
+  captureAccuracy Decimal? @db.Decimal(8, 2)
+
+  uploadedByType PrincipalType?
+  uploadedById   String?
+  uploadedBy     User?          @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  caption  String?
+  metadata Json?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([tenantId, investigationId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, mediaType])
+  @@index([tenantId, status])
+  @@map("media_assets")
+}
+
+enum GpsEventType {
+  CHECK_IN
+  CHECK_OUT
+  PHOTO_CAPTURE
+  LOCATION_UPDATE
+  ROUTE_START
+  ROUTE_END
+}
+
+/// A position report. Append-only and never updated — a corrected location is a
+/// new row, because the point of this table is what was reported at the time.
+model GpsEvent {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  investigationId String?
+  investigation   Investigation? @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  investigatorId String?
+  investigator   Investigator? @relation(fields: [investigatorId], references: [id], onDelete: SetNull)
+
+  eventType GpsEventType
+
+  lat        Decimal  @db.Decimal(10, 7)
+  lng        Decimal  @db.Decimal(10, 7)
+  accuracyM  Decimal? @db.Decimal(8, 2)
+  altitudeM  Decimal? @db.Decimal(8, 2)
+  speedMps   Decimal? @db.Decimal(8, 2)
+  headingDeg Decimal? @db.Decimal(6, 2)
+
+  /// Distance from the case's target coordinates, computed on write so the QC
+  /// screen does not recompute it per row.
+  distanceFromTargetM Int?
+
+  /// Reported by the device. A device with a manipulated clock is why this is
+  /// separate from `createdAt`.
+  recordedAt DateTime
+  createdAt  DateTime @default(now())
+
+  metadata Json?
+
+  @@index([tenantId, investigationId, recordedAt])
+  @@index([tenantId, investigatorId, recordedAt])
+  @@map("gps_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  QUALITY CONTROL
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum QcDecision {
+  APPROVED
+  REJECTED
+  REWORK
+}
+
+/// Configurable rejection reasons. Codes are stable; the labels are what QC
+/// sees.
+model QcRejectionReason {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code       String
+  nameAr     String
+  nameEn     String
+  /// Whether choosing this reason forces a free-text explanation.
+  needsNote  Boolean @default(false)
+  sortOrder  Int     @default(0)
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reviews QcReviewReason[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("qc_rejection_reasons")
+}
+
+/// One QC pass over one submission. Append-only: a case that goes round twice
+/// has two rows, and neither is edited.
+model QcReview {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  /// Which attempt was reviewed. Pinned so a later resubmission cannot make an
+  /// old verdict look like it was about the new answers.
+  submissionId String?
+  attempt      Int     @default(1)
+
+  reviewerId String?
+  reviewer   User?   @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  decision QcDecision
+  comment  String?
+  /// Per-field remarks keyed by form field key.
+  fieldRemarks Json?
+  score    Int?
+
+  reviewedAt DateTime @default(now())
+
+  reasons QcReviewReason[]
+
+  @@index([tenantId, investigationId, reviewedAt])
+  @@index([tenantId, reviewerId])
+  @@map("qc_reviews")
+}
+
+model QcReviewReason {
+  reviewId String
+  review   QcReview          @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reasonId String
+  reason   QcRejectionReason @relation(fields: [reasonId], references: [id], onDelete: Cascade)
+  note     String?
+
+  @@id([reviewId, reasonId])
+  @@index([reasonId])
+  @@map("qc_review_reasons")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  REPORTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ReportStatus {
+  QUEUED
+  GENERATING
+  READY
+  FAILED
+}
+
+enum ReportLocale {
+  AR
+  EN
+  BILINGUAL
+}
+
+/// A Handlebars document template. Products and investigation types point at
+/// one of these; the resolution order is type, then product, then the tenant
+/// default.
+model ReportTemplate {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  nameAr      String
+  nameEn      String
+  description String?
+
+  /// Handlebars source for the body, plus the optional running header/footer.
+  bodyHtml   String
+  headerHtml String?
+  footerHtml String?
+  css        String?
+
+  showLogo      Boolean @default(true)
+  showQrCode    Boolean @default(true)
+  showWatermark Boolean @default(false)
+  watermarkText String?
+  disclaimerAr  String?
+  disclaimerEn  String?
+
+  pageSize   String @default("A4")
+  marginsMm  Json   @default("{\"top\":18,\"right\":14,\"bottom\":18,\"left\":14}")
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products           Product[]
+  investigationTypes InvestigationType[]
+  reports            Report[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("report_templates")
+}
+
+/// A generated document. Regenerating produces a new row with the next version
+/// number; nothing overwrites a delivered report.
+model Report {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  investigationId String
+  investigation   Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  templateId String?
+  template   ReportTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  version Int
+  status  ReportStatus @default(QUEUED)
+  locale  ReportLocale @default(AR)
+  isFinal Boolean      @default(false)
+
+  storageKey String?
+  fileName   String?
+  sizeBytes  Int?
+  checksum   String?
+  pageCount  Int?
+
+  /// The exact data the template was rendered with. Kept so a report can be
+  /// explained years later even if the case has moved on since.
+  snapshot Json?
+
+  error       String?
+  jobId       String?
+  requestedById String?
+  requestedBy   User?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+
+  generatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([investigationId, version])
+  @@index([tenantId, investigationId])
+  @@index([tenantId, status])
+  @@map("reports")
+}
+
+enum ExportFormat {
+  XLSX
+  CSV
+  PDF
+}
+
+enum ExportStatus {
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+  EXPIRED
+}
+
+/// A large export, run on a worker. The filters are stored rather than the
+/// result set so the job re-runs the same query the user saw.
+model ExportJob {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  resource String
+  format   ExportFormat
+  status   ExportStatus @default(QUEUED)
+
+  filters Json?
+  columns String[] @default([])
+
+  rowCount   Int?
+  storageKey String?
+  fileName   String?
+  sizeBytes  Int?
+  error      String?
+
+  requestedById String?
+  requestedBy   User?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+
+  expiresAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, requestedById, createdAt])
+  @@index([tenantId, status])
+  @@map("export_jobs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum NotificationType {
+  CASE_CREATED
+  CASE_IMPORTED
+  CASE_ASSIGNED
+  CASE_REASSIGNED
+  CASE_ACCEPTED
+  CASE_REJECTED_BY_INVESTIGATOR
+  CASE_SUBMITTED
+  QC_APPROVED
+  QC_REJECTED
+  REWORK_REQUESTED
+  SLA_WARNING
+  SLA_BREACH
+  ESCALATION
+  REPORT_READY
+  EXPORT_READY
+  IMPORT_COMPLETED
+  SYSTEM
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+  SMS
+}
+
+/// One addressed notification. A row is addressed to exactly one principal —
+/// broadcasts fan out into rows rather than being read by everyone, so "mark as
+/// read" means something.
+model Notification {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  recipientType PrincipalType
+  userId        String?
+  user          User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  investigatorId String?
+  investigator   Investigator? @relation(fields: [investigatorId], references: [id], onDelete: Cascade)
+
+  type     NotificationType
+  channels NotificationChannel[] @default([IN_APP])
+
+  /// Both languages are stored, because a notification outlives the session that
+  /// created it and the reader may not share the writer's language.
+  titleAr String
+  titleEn String
+  bodyAr  String
+  bodyEn  String
+
+  /// What to open when the notification is clicked.
+  entityType String?
+  entityId   String?
+  link       String?
+
+  priority Priority @default(NORMAL)
+  readAt   DateTime?
+  sentAt   DateTime?
+  /// Per-channel delivery outcome, for the channels that can fail.
+  deliveryStatus Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, userId, readAt])
+  @@index([tenantId, investigatorId, readAt])
+  @@index([tenantId, createdAt])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUDIT
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AuditCategory {
+  AUTH
+  USER
+  ROLE
+  INVESTIGATOR
+  CUSTOMER
+  INVESTIGATION
+  ASSIGNMENT
+  IMPORT
+  FORM
+  MEDIA
+  QC
+  REPORT
+  EXPORT
+  SETTINGS
+  TENANT
+  SECURITY
+}
+
+enum AuditSeverity {
+  INFO
+  NOTICE
+  WARNING
+  CRITICAL
+}
+
+/// Immutable activity log. There is no update or delete path through the API —
+/// the service exposes `log` and the controller exposes reads only.
+model AuditLog {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Verb, as a stable string rather than an enum: new actions arrive with new
+  /// features and must not need a migration to be recordable.
+  action   String
+  category AuditCategory
+  severity AuditSeverity @default(INFO)
+
+  actorType PrincipalType?
+  actorId   String?
+  actorName String?
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  entityType String?
+  entityId   String?
+  entityLabel String?
+
+  /// Only the fields that changed, not whole rows — a full before/after on a
+  /// wide table makes the log unreadable and stores personal data twice.
+  oldValue Json?
+  newValue Json?
+
+  ip        String?
+  userAgent String?
+  device    String?
+  requestId String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, category, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, userId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CLIENT PORTAL — boundary only, so the future portal needs no remodelling
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A bank or lender that sends work to this tenant. Cases carry no FK to it yet;
+/// what exists today is the account, its API key and the shape of the link, so
+/// the portal can be built without a destructive migration.
+model ClientAccount {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code   String
+  nameAr String
+  nameEn String
+
+  contactEmail String?
+  contactPhone String?
+
+  /// SHA-256 of the API key. Rotating means writing a new hash.
+  apiKeyHash   String? @unique
+  apiKeyPrefix String?
+  webhookUrl   String?
+  webhookSecretEnc String?
+
+  /// The portal login, when the client has one. A web user with the CLIENT_USER
+  /// role rather than a third principal type.
+  portalUserId String? @unique
+  portalUser   User?   @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("client_accounts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  INFRASTRUCTURE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Leases a named scheduled job to one instance. Ported from Collex System V1,
+/// including its fail-open posture: if the lease cannot be read the job runs
+/// anyway, so a missing migration can never silently stop a sweep.
+model CronLock {
+  name       String   @id
+  lockedUntil DateTime
+  lockedBy   String
+  updatedAt  DateTime @updatedAt
+
+  @@map("cron_locks")
+}
+
+/// Idempotency for the mobile client's offline queue. A retried submission
+/// carrying a key it has already used gets the first response back instead of
+/// creating a second row.
+model IdempotencyKey {
+  key         String   @id
+  tenantId    String
+  principalId String
+  endpoint    String
+  statusCode  Int
+  response    Json
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
