@@ -198,7 +198,7 @@ export default function InvestigationDetail() {
 
       {tab === 'overview' && <Overview investigation={data} language={i18n.language} />}
       {tab === 'customer' && <CustomerTab investigation={data} />}
-      {tab === 'investigation' && <CaseAnswers investigationId={id} />}
+      {tab === 'investigation' && <CaseAnswers investigationId={id} investigation={data} />}
       {tab === 'photos' && <CaseEvidence investigationId={id} status={data.status} />}
       {tab === 'gps' && <CaseGps investigationId={id} />}
       {tab === 'timeline' && <CaseTimeline investigationId={id} />}

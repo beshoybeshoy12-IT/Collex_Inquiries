@@ -109,3 +109,17 @@ export class SubmitFormDto extends SaveSubmissionDto {
   @MaxLength(64)
   clientSubmissionId?: string;
 }
+
+export class ChooseFormDto {
+  @ApiProperty({ description: 'The form template the case is answered on.' })
+  @IsUUID()
+  formTemplateId: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Confirms that answers already entered on the current form may be discarded.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  discardDraft?: boolean;
+}

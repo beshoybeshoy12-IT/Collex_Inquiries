@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -14,6 +15,7 @@ import { PrincipalType } from '@prisma/client';
 import { FormsService } from './forms.service';
 import { SubmissionsService } from './submissions.service';
 import {
+  ChooseFormDto,
   CreateDraftDto,
   CreateFormTemplateDto,
   SaveFormVersionDto,
@@ -206,6 +208,40 @@ export class FormsController {
     @Body() dto: SaveSubmissionDto,
   ) {
     return this.submissions.saveDraft(
+      tenantId,
+      investigationId,
+      principal,
+      dto,
+    );
+  }
+
+  @Put('investigation/:investigationId/form')
+  @RequirePermission(P.INVESTIGATIONS_EDIT)
+  @ApiOperation({
+    summary: 'Choose which form the case is answered on (before submission)',
+  })
+  chooseForm(
+    @TenantId() tenantId: string,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+    @Param('investigationId', ParseUUIDPipe) investigationId: string,
+    @Body() dto: ChooseFormDto,
+  ) {
+    return this.submissions.chooseForm(tenantId, investigationId, principal, dto);
+  }
+
+  @Patch('investigation/:investigationId/office')
+  @RequirePermission(P.INVESTIGATIONS_EDIT)
+  @ApiOperation({
+    summary:
+      'The office enters the paper form an investigator handed in (saved as a draft)',
+  })
+  saveOfficeAnswers(
+    @TenantId() tenantId: string,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+    @Param('investigationId', ParseUUIDPipe) investigationId: string,
+    @Body() dto: SaveSubmissionDto,
+  ) {
+    return this.submissions.saveOfficeAnswers(
       tenantId,
       investigationId,
       principal,

@@ -85,12 +85,27 @@ export default function FormList() {
                 <Panel
                   title={localisedName(template, i18n.language)}
                   actions={
-                    <Link
-                      to={`/admin/forms/${template.id}`}
-                      className="btn btn-sm btn-outline-secondary py-0"
-                    >
-                      {t('forms.builder')}
-                    </Link>
+                    <span className="d-flex gap-1">
+                      {published && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary py-0"
+                          title={t('inquirySheet.printBlank')}
+                          aria-label={t('inquirySheet.printBlank')}
+                          onClick={() =>
+                            window.open(`/print/form/${template.id}`, '_blank', 'noopener')
+                          }
+                        >
+                          <i className="bi bi-printer" aria-hidden="true" />
+                        </button>
+                      )}
+                      <Link
+                        to={`/admin/forms/${template.id}`}
+                        className="btn btn-sm btn-outline-secondary py-0"
+                      >
+                        {t('forms.builder')}
+                      </Link>
+                    </span>
                   }
                 >
                   <div className="small text-body-secondary mb-2 mono">

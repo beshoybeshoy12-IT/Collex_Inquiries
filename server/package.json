@@ -18,6 +18,7 @@
     "db:extensions": "prisma db execute --file prisma/extensions.sql --schema prisma/schema.prisma",
     "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
     "db:platform-admin": "ts-node -r tsconfig-paths/register prisma/seed-platform-admin.ts",
+    "db:inquiry-forms": "ts-node -r tsconfig-paths/register prisma/seed-inquiry-forms.ts",
     "format": "prettier --write \"src/**/*.ts\" \"prisma/**/*.ts\"",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "test": "jest",

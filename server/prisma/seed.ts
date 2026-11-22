@@ -22,7 +22,7 @@ import {
   DEFAULT_REPORT_BODY,
   DEFAULT_REPORT_CSS,
 } from '../src/reports/report-template.default';
-import { RESIDENCE_FORM_SCHEMA, WORKPLACE_FORM_SCHEMA } from './seed-data/forms';
+import { INQUIRY_FORMS } from './seed-data/forms';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -584,14 +584,11 @@ async function seedDemoTenant(): Promise<void> {
   console.log('✓ Report template: STANDARD_AR (default)');
 
   // ── Forms ────────────────────────────────────────────────────────────────
-  for (const [typeCode, schema, nameAr, nameEn] of [
-    ['RESIDENCE', RESIDENCE_FORM_SCHEMA, 'نموذج استعلام السكن', 'Residence Verification Form'],
-    ['WORKPLACE', WORKPLACE_FORM_SCHEMA, 'نموذج استعلام العمل', 'Workplace Verification Form'],
-  ] as const) {
+  for (const { typeCode, templateCode, schema, nameAr, nameEn } of INQUIRY_FORMS) {
     const template = await prisma.formTemplate.create({
       data: {
         tenantId: tenant.id,
-        code: `${typeCode}_FORM`,
+        code: templateCode,
         nameAr,
         nameEn,
         isActive: true,

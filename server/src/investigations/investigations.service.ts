@@ -114,6 +114,18 @@ export class InvestigationsService {
     return { OR: clauses };
   }
 
+  /**
+   * The same visibility rule for callers in other modules, which must not
+   * grow their own copy of it. Returns the bare row, or 404.
+   */
+  async assertVisible(
+    tenantId: string,
+    id: string,
+    principal: AuthenticatedPrincipal,
+  ) {
+    return this.findVisible(tenantId, id, principal);
+  }
+
   /** Load a case the caller is allowed to see, or 404. */
   private async findVisible(
     tenantId: string,

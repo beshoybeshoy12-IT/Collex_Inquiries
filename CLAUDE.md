@@ -55,7 +55,9 @@ npm test                 # server jest suite
 
 Server (`cd server`): `npm run start:dev`, `npm run worker:dev`, `npm test`,
 `npx jest <file>`, `npx jest -t "<name>"`, `npm run db:deploy`, `npm run db:seed`,
-`npm run db:platform-admin`.
+`npm run db:platform-admin`, `npm run db:inquiry-forms [-- <tenant-code>]` (publishes the
+residence/work inquiry forms from `prisma/seed-data/forms.ts` into existing tenants as a
+new version; idempotent).
 
 Client (`cd client`): `npm run dev`, `npm run build`, `npm run lint`.
 
@@ -244,6 +246,17 @@ administrator. Frontend gates remain conveniences; the controller is the control
 - **Forms** — `FormVersion` rows are immutable once published, and a case pins the
   `formVersionId` it was created under. Editing a form must never change what an
   already-submitted case was asked.
+- **Paper forms** — the office types in a paper form through
+  `PATCH /forms/investigation/:id/office` (`investigations.edit`, which QC lacks on
+  purpose). It writes a DRAFT only, only from ASSIGNED to REWORK, and never moves the
+  case. `client/src/modules/forms/InquirySheet.jsx` draws any schema as the paper sheet
+  (edit / read / blank) and `/print/...` routes print it; print CSS is tuned so both
+  seeded forms fit one A4 page — re-measure if you add fields.
+- **Choosing a case's form** — a case defaults to its type's form, but the office can
+  put it on any published form (`PUT /forms/investigation/:id/form`) until the first
+  submission; it is stored as the case's `formVersionId`. Assignment therefore pins
+  **only when the case has no form yet** — reassignment and rework keep the existing
+  pin. Switching discards an unsubmitted draft only with `discardDraft: true`.
 
 ### Imports
 

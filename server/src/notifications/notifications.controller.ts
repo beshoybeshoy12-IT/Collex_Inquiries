@@ -25,6 +25,8 @@ import {
   MaxLength,
 } from 'class-validator';
 import { NotificationsService } from './notifications.service';
+import { PushService } from '../push/push.service';
+import { RegisterDeviceDto } from '../push/dto/device.dto';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import {
   AllowPrincipals,
@@ -80,7 +82,61 @@ class BroadcastDto {
 @AllowPrincipals(PrincipalType.WEB_USER, PrincipalType.INVESTIGATOR)
 @Controller({ path: 'notifications', version: '1' })
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly push: PushService,
+  ) {}
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Devices
+  //
+  //  Registration is its own route rather than a field on login, because a
+  //  provider token ROTATES on the provider's schedule — FCM reissues without
+  //  being asked, mid-session, with no login to hang the update on. A token
+  //  captured only at sign-in goes stale silently, and the symptom is a
+  //  notification that never arrives while everything looks healthy.
+  //
+  //  Declared before the parameterised routes below: `devices` would otherwise
+  //  be matched by `@Delete(':id')` as a uuid and rejected by ParseUUIDPipe.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Post('devices')
+  @ApiOperation({
+    summary: 'Register this handset for push, or move it to this account',
+  })
+  registerDevice(
+    @TenantId() tenantId: string,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+    @Body() dto: RegisterDeviceDto,
+  ) {
+    return this.push.register(tenantId, principal, dto);
+  }
+
+  @Get('devices')
+  @ApiOperation({
+    summary: 'Handsets you have registered. Tokens are never returned.',
+  })
+  listDevices(
+    @TenantId() tenantId: string,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+  ) {
+    return this.push.listForPrincipal(tenantId, principal);
+  }
+
+  @Delete('devices/:token')
+  @ApiOperation({
+    summary: 'Unregister a handset — call this on sign-out',
+  })
+  unregisterDevice(
+    @TenantId() tenantId: string,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+    @Param('token') token: string,
+  ) {
+    // No ParseUUIDPipe: a provider token is not a uuid. Ownership is the
+    // filter, and a token that is not the caller's reports zero removed rather
+    // than 404 — confirming a token exists is an oracle with no use.
+    return this.push.unregister(tenantId, principal, token);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Your own notifications' })

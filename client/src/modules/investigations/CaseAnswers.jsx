@@ -1,10 +1,54 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQuery } from '@tanstack/react-query';
-import api from '../../services/api';
-import { localisedLabel } from '../../i18n';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api, { localiseServerMessage } from '../../services/api';
+import { localisedLabel, localisedName } from '../../i18n';
+import { useAuth } from '../../app/AuthContext';
+import { P } from '../../utils/permissions';
+import { conditionsMet } from '../../utils/formConditions';
 import EmptyState from '../../components/EmptyState';
 import ErrorState from '../../components/ErrorState';
 import { Panel } from '../../components/PageHeader';
+import { useToast } from '../../components/Toast';
+import InquirySheet from '../forms/InquirySheet';
+import { sheetHeader } from '../forms/sheetHeader';
+
+/**
+ * When the office may type in a paper form. Mirrors `OFFICE_ENTRY_STATUSES`
+ * in `submissions.service.ts`, which is the control; this only decides
+ * whether to offer the button.
+ */
+const OFFICE_ENTRY_STATUSES = [
+  'ASSIGNED',
+  'ACCEPTED',
+  'EN_ROUTE',
+  'ON_SITE',
+  'IN_PROGRESS',
+  'REWORK',
+];
+
+/**
+ * When the office may switch the case to another form. Mirrors
+ * `FORM_CHOICE_STATUSES` in `submissions.service.ts`; the server also refuses
+ * once any attempt has been submitted.
+ */
+const FORM_CHOICE_STATUSES = ['NEW', 'VALIDATING', 'READY_FOR_ASSIGNMENT', ...OFFICE_ENTRY_STATUSES];
+
+/**
+ * Open a printable sheet in its own tab. With `formId` it is that form,
+ * blank, under this case's header — any form, not only the case's own.
+ */
+function openPrint(investigationId, { blank = false, formId } = {}) {
+  const params = new URLSearchParams();
+  if (blank) params.set('blank', '1');
+  if (formId) params.set('form', formId);
+  const query = params.toString();
+  window.open(
+    `/print/investigation/${investigationId}${query ? `?${query}` : ''}`,
+    '_blank',
+    'noopener',
+  );
+}
 
 /**
  * The investigator's answers, rendered against the form version this case was
@@ -18,9 +62,21 @@ import { Panel } from '../../components/PageHeader';
  * Conditional fields the investigator never saw are skipped rather than shown
  * as empty, or a form with a large "customer not found" branch reads as half
  * unanswered on every case where the customer *was* found.
+ *
+ * The office can also type in the paper form an investigator brought back
+ * (the "enter form" button, drawn as the paper sheet) and print the sheet —
+ * blank for the investigator to fill by hand, or filled for the file.
  */
-export default function CaseAnswers({ investigationId }) {
+export default function CaseAnswers({ investigationId, investigation }) {
   const { t, i18n } = useTranslation();
+  const { can } = useAuth();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({});
+  const [dirty, setDirty] = useState(false);
+  const [warnings, setWarnings] = useState([]);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['case-form', investigationId],
@@ -29,11 +85,126 @@ export default function CaseAnswers({ investigationId }) {
     retry: false,
   });
 
+  const save = useMutation({
+    mutationFn: async (answers) =>
+      (await api.patch(`/forms/investigation/${investigationId}/office`, { answers }))
+        .data,
+    onSuccess: (result) => {
+      toast.success(t('common.saved'));
+      setDirty(false);
+      setWarnings(result.warnings ?? []);
+      queryClient.invalidateQueries({ queryKey: ['case-form', investigationId] });
+    },
+    onError: (mutationError) =>
+      toast.error(localiseServerMessage(mutationError.friendlyMessage)),
+  });
+
+  // Every published form the tenant has — one blank-print button each, and
+  // the choices for which form this case is answered on.
+  const { data: templates } = useQuery({
+    queryKey: ['forms', 'active'],
+    queryFn: async () => (await api.get('/forms', { params: { activeOnly: true } })).data,
+    enabled: can(P.FORMS_VIEW),
+  });
+  const forms = (templates ?? []).filter((template) =>
+    template.versions?.some((version) => version.isPublished),
+  );
+
+  const choose = useMutation({
+    mutationFn: async ({ formTemplateId, discardDraft }) =>
+      (
+        await api.put(`/forms/investigation/${investigationId}/form`, {
+          formTemplateId,
+          discardDraft,
+        })
+      ).data,
+    onSuccess: (result) => {
+      // Say what changed: a bare "saved" after clicking what looks like a
+      // view switch reads as the screen saving something on its own.
+      toast.success(
+        t('inquirySheet.formChanged', { name: localisedName(result, i18n.language) }),
+      );
+      setEditing(false);
+      setDirty(false);
+      setWarnings([]);
+      queryClient.invalidateQueries({ queryKey: ['case-form', investigationId] });
+    },
+    onError: (mutationError) =>
+      toast.error(localiseServerMessage(mutationError.friendlyMessage)),
+  });
+
+  const currentFormId = data?.templateId;
+  const submission = data?.submission;
+  const hasTypedAnswers =
+    submission?.status === 'DRAFT' && Object.keys(submission.answers ?? {}).length > 0;
+  const canChoose =
+    can(P.INVESTIGATIONS_EDIT) &&
+    FORM_CHOICE_STATUSES.includes(investigation?.status) &&
+    (!submission || submission.status === 'DRAFT');
+
+  // Switching is a stored change to the case, not a way of viewing the other
+  // form (that is what the blank-print buttons are for), so it always asks.
+  const pickForm = (form) => {
+    if (form.id === currentFormId || choose.isPending) return;
+    const name = localisedName(form, i18n.language);
+    const question = hasTypedAnswers
+      ? `${t('inquirySheet.confirmSwitch', { name })}\n\n${t('inquirySheet.switchDiscards')}`
+      : t('inquirySheet.confirmSwitch', { name });
+    if (!window.confirm(question)) return;
+    choose.mutate({ formTemplateId: form.id, discardDraft: hasTypedAnswers });
+  };
+
+  // Which form this case is answered on, and a blank print of every form.
+  const formBar = forms.length > 0 && (
+    <div className="d-flex flex-wrap gap-3 align-items-center mb-3 pb-3 border-bottom">
+      <div className="d-flex flex-wrap gap-2 align-items-center">
+        <span className="small fw-semibold">{t('inquirySheet.caseForm')}</span>
+        <div className="btn-group btn-group-sm" role="group" aria-label={t('inquirySheet.caseForm')}>
+          {forms.map((form) => {
+            const active = form.id === currentFormId;
+            return (
+              <button
+                key={form.id}
+                type="button"
+                className={`btn ${active ? 'btn-primary' : 'btn-outline-primary'}`}
+                aria-pressed={active}
+                onClick={() => pickForm(form)}
+                disabled={!active && (!canChoose || choose.isPending)}
+              >
+                {localisedName(form, i18n.language)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="d-flex flex-wrap gap-2 align-items-center ms-auto">
+        <span className="small fw-semibold">{t('inquirySheet.printBlankOf')}</span>
+        {forms.map((form) => (
+          <button
+            key={form.id}
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => openPrint(investigationId, { blank: true, formId: form.id })}
+          >
+            <i className="bi bi-printer me-1" aria-hidden="true" />
+            {localisedName(form, i18n.language)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   if (error) {
     // A case whose type has no form is a legitimate configuration, not a
-    // failure — say so rather than showing an error.
+    // failure — say so, and still offer to put the case on one.
     if (error.status === 404) {
-      return <EmptyState title={t('forms.noForms')} icon="ui-checks" />;
+      return (
+        <>
+          {formBar}
+          <EmptyState title={t('forms.noForms')} icon="ui-checks" />
+        </>
+      );
     }
     return <ErrorState error={error} onRetry={refetch} />;
   }
@@ -46,11 +217,129 @@ export default function CaseAnswers({ investigationId }) {
     );
   }
 
-  const submission = data?.submission;
   const answers = submission?.answers ?? {};
+  const canEnter =
+    can(P.INVESTIGATIONS_EDIT) && OFFICE_ENTRY_STATUSES.includes(investigation?.status);
+
+  const startEditing = () => {
+    setDraft({ ...answers });
+    setDirty(false);
+    setWarnings([]);
+    setEditing(true);
+  };
+
+  const stopEditing = () => {
+    if (dirty && !window.confirm(t('common.unsavedChanges'))) return;
+    setEditing(false);
+    setWarnings([]);
+  };
+
+  const toolbar = (
+    <>
+    {formBar}
+    <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
+      {editing ? (
+        <>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={() => save.mutate(draft)}
+            disabled={!dirty || save.isPending}
+          >
+            <i className="bi bi-floppy me-1" aria-hidden="true" />
+            {t('common.save')}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={stopEditing}
+            disabled={save.isPending}
+          >
+            {t('common.close')}
+          </button>
+          {dirty && (
+            <span className="small text-warning-emphasis">{t('common.unsavedChanges')}</span>
+          )}
+        </>
+      ) : (
+        canEnter && (
+          <button type="button" className="btn btn-sm btn-primary" onClick={startEditing}>
+            <i className="bi bi-pencil-square me-1" aria-hidden="true" />
+            {submission ? t('inquirySheet.edit') : t('inquirySheet.enter')}
+          </button>
+        )
+      )}
+
+      <span className="ms-auto d-flex flex-wrap gap-2">
+        {forms.length === 0 && (
+          // Without the forms list (no forms.view), still offer this case's own.
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => openPrint(investigationId, { blank: true })}
+          >
+            <i className="bi bi-printer me-1" aria-hidden="true" />
+            {t('inquirySheet.printBlank')}
+          </button>
+        )}
+        {submission && (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => openPrint(investigationId)}
+            disabled={dirty}
+            title={dirty ? t('common.unsavedChanges') : undefined}
+          >
+            <i className="bi bi-printer-fill me-1" aria-hidden="true" />
+            {t('inquirySheet.printFilled')}
+          </button>
+        )}
+      </span>
+    </div>
+    </>
+  );
+
+  if (editing) {
+    return (
+      <>
+        {toolbar}
+        <p className="small text-body-secondary">{t('inquirySheet.enterHint')}</p>
+        {warnings.length > 0 && (
+          <div className="alert alert-warning py-2 px-3 small">
+            <span className="fw-semibold">{t('inquirySheet.warnings')}</span>
+            <ul className="mb-0 mt-1 ps-3">
+              {warnings.map((warning, index) => (
+                <li key={index}>
+                  {localisedLabel(warning, i18n.language)}:{' '}
+                  {i18n.language === 'ar' ? warning.reasonAr : warning.reasonEn}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <Panel>
+          <InquirySheet
+            title={localisedName(data, i18n.language)}
+            header={sheetHeader(t, investigation)}
+            schema={data.schema}
+            answers={draft}
+            onChange={(key, value) => {
+              setDraft((current) => ({ ...current, [key]: value }));
+              setDirty(true);
+            }}
+          />
+        </Panel>
+      </>
+    );
+  }
 
   if (!submission) {
-    return <EmptyState title={t('common.empty')} icon="ui-checks" />;
+    return (
+      <>
+        {toolbar}
+        <EmptyState title={t('common.empty')} icon="ui-checks" />
+      </>
+    );
   }
 
   const visibleSections = (data.schema?.sections ?? []).filter((section) =>
@@ -59,10 +348,14 @@ export default function CaseAnswers({ investigationId }) {
 
   return (
     <>
+      {toolbar}
       <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
         <span className="badge text-bg-light">
           {t('forms.version', { n: data.version })}
         </span>
+        {submission.status === 'DRAFT' && (
+          <span className="badge text-bg-warning">{t('inquirySheet.draftBadge')}</span>
+        )}
         <span className="badge text-bg-light">
           {t('qc.attempt', { n: submission.attempt })}
         </span>
@@ -211,48 +504,4 @@ function AnswerValue({ field, value }) {
   }
 
   return String(value);
-}
-
-/**
- * The client-side twin of the server's `isVisible`.
- *
- * Both read the same `visibleWhen` data from the same schema, so a field the
- * investigator never saw is skipped identically here and in the answer
- * validator. Keeping them in step matters: if this one is more permissive, the
- * report shows a question that was never asked.
- */
-function conditionsMet(conditions, answers) {
-  if (!conditions?.length) return true;
-
-  return conditions.every((condition) => {
-    const actual = answers[condition.field];
-    const isEmpty =
-      actual === null ||
-      actual === undefined ||
-      actual === '' ||
-      (Array.isArray(actual) && actual.length === 0);
-
-    switch (condition.operator) {
-      case 'EQUALS':
-        return String(actual ?? '') === String(condition.value ?? '');
-      case 'NOT_EQUALS':
-        return String(actual ?? '') !== String(condition.value ?? '');
-      case 'IN':
-        return (
-          Array.isArray(condition.value) &&
-          condition.value.map(String).includes(String(actual ?? ''))
-        );
-      case 'NOT_IN':
-        return (
-          Array.isArray(condition.value) &&
-          !condition.value.map(String).includes(String(actual ?? ''))
-        );
-      case 'IS_EMPTY':
-        return isEmpty;
-      case 'IS_NOT_EMPTY':
-        return !isEmpty;
-      default:
-        return true;
-    }
-  });
 }

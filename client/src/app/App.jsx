@@ -39,6 +39,12 @@ const ProductList = lazy(() => import('../modules/catalog/ProductList'));
 const InvestigationTypeList = lazy(() => import('../modules/catalog/InvestigationTypeList'));
 const FormList = lazy(() => import('../modules/forms/FormList'));
 const FormBuilder = lazy(() => import('../modules/forms/FormBuilder'));
+const PrintCaseSheet = lazy(() =>
+  import('../modules/forms/PrintSheet').then((m) => ({ default: m.PrintCaseSheet })),
+);
+const PrintBlankForm = lazy(() =>
+  import('../modules/forms/PrintSheet').then((m) => ({ default: m.PrintBlankForm })),
+);
 const SlaSettings = lazy(() => import('../modules/sla/SlaSettings'));
 const CompanySettings = lazy(() => import('../modules/settings/CompanySettings'));
 const AuditLog = lazy(() => import('../modules/audit/AuditLog'));
@@ -87,6 +93,24 @@ export default function App() {
     <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
+
+        {/* Printable sheets sit outside the layout so only the paper prints. */}
+        <Route
+          path="print/investigation/:id"
+          element={
+            <ProtectedRoute permissions={[P.INVESTIGATIONS_VIEW]}>
+              <PrintCaseSheet />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="print/form/:id"
+          element={
+            <ProtectedRoute permissions={[P.FORMS_VIEW]}>
+              <PrintBlankForm />
+            </ProtectedRoute>
+          }
+        />
 
         <Route element={<AppLayout />}>
           <Route

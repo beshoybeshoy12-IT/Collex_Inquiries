@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { PushService, asJson } from '../push/push.service';
 import { paginate } from '../common/interfaces/api.interface';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
@@ -44,10 +45,18 @@ export interface NotificationInput {
  *  alongside operations that must not be rolled back because a notification
  *  could not be created. Failures are logged and swallowed.
  *
- *  PUSH IS PREPARED, NOT PRETENDED. `channels` can name PUSH and the row
- *  records it, but nothing in this build talks to FCM or APNs — the mobile
- *  application does not exist yet. `deliveryStatus` is where the outcome will
- *  go when it does. Nothing here claims a push was sent.
+ *  PUSH IS DELIVERED THROUGH AN INTERFACE, AND SAYS HONESTLY WHAT HAPPENED.
+ *  A notification naming PUSH in `channels` is handed to `PushService`, which
+ *  looks up the recipient's registered handsets and asks whatever driver is
+ *  configured to send. `deliveryStatus` then records the outcome — how many
+ *  handsets were attempted, how many were reached, and why not when the answer
+ *  is none.
+ *
+ *  In this build no provider is configured, so the answer is "attempted N,
+ *  sent 0, no push provider configured". That is the truth, written down where
+ *  it can be read, rather than a silent no-op that looks like success. When an
+ *  FCM driver is added the same field starts reporting real deliveries and
+ *  nothing here changes.
  */
 @Injectable()
 export class NotificationsService {
@@ -56,6 +65,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly push: PushService,
   ) {}
 
   /** Notify one web user. */
@@ -158,9 +168,66 @@ export class NotificationsService {
           createdAt: row.createdAt,
         });
       }
+
+      // The socket only reaches an app that is open and connected. A handset in
+      // a pocket outside a customer's house is neither, which is the entire
+      // reason push exists.
+      if (recipientId && row.channels.includes(NotificationChannel.PUSH)) {
+        await this.pushAndRecord(row.id, tenantId, recipientId, data);
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create ${data.type} notification: ${String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Push, then write down what happened.
+   *
+   * SWALLOWS EVERYTHING. It is called from inside `create`'s try block, and a
+   * throw here would be logged as "failed to create notification" about a
+   * notification that was created perfectly well — a misleading log is worse
+   * than no log. `PushService.deliver` already returns rather than throws; this
+   * catches anyway, because the `update` below can fail on its own.
+   *
+   * The record is a second write rather than part of the insert because the
+   * outcome is not known until after the row exists — the row is what the
+   * delivery is *of*.
+   */
+  private async pushAndRecord(
+    notificationId: string,
+    tenantId: string,
+    recipientId: string,
+    data: { recipientType: PrincipalType; entityType?: string; entityId?: string; link?: string; priority?: keyof typeof Priority; titleAr: string; titleEn: string; bodyAr: string; bodyEn: string },
+  ): Promise<void> {
+    try {
+      const record = await this.push.deliver({
+        tenantId,
+        principalId: recipientId,
+        principalType: data.recipientType,
+        titleAr: data.titleAr,
+        titleEn: data.titleEn,
+        bodyAr: data.bodyAr,
+        bodyEn: data.bodyEn,
+        // Strings only: FCM and APNs data payloads are string maps, so
+        // anything else would be stringified inconsistently per provider.
+        data: {
+          notificationId,
+          ...(data.entityType ? { entityType: data.entityType } : {}),
+          ...(data.entityId ? { entityId: data.entityId } : {}),
+          ...(data.link ? { link: data.link } : {}),
+        },
+        highPriority: data.priority === 'URGENT' || data.priority === 'HIGH',
+      });
+
+      await this.prisma.notification.update({
+        where: { id: notificationId },
+        data: { deliveryStatus: asJson(record), sentAt: new Date() },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Push delivery record for ${notificationId} failed: ${String(error)}`,
       );
     }
   }

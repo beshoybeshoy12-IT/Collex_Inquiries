@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -19,8 +20,39 @@ import {
   MEDIA_TYPES,
   FormSchema,
 } from './form-schema';
-import { SaveSubmissionDto, SubmitFormDto } from './dto/form.dto';
+import {
+  ChooseFormDto,
+  SaveSubmissionDto,
+  SubmitFormDto,
+} from './dto/form.dto';
 import { AuthenticatedPrincipal } from '../common/decorators/auth.decorators';
+
+/**
+ * When the office may type a paper form into a case: from assignment until the
+ * investigator's work is handed in. Before assignment no form version is
+ * pinned yet; once submitted, the answers are under review and changing them
+ * there would change what QC is judging.
+ */
+const OFFICE_ENTRY_STATUSES: InvestigationStatus[] = [
+  InvestigationStatus.ASSIGNED,
+  InvestigationStatus.ACCEPTED,
+  InvestigationStatus.EN_ROUTE,
+  InvestigationStatus.ON_SITE,
+  InvestigationStatus.IN_PROGRESS,
+  InvestigationStatus.REWORK,
+];
+
+/**
+ * When the office may change which form a case is answered on: any time before
+ * the investigator's work is handed in. Once an attempt has been submitted the
+ * form is part of the evidence, and a rework must be answered on the same one.
+ */
+const FORM_CHOICE_STATUSES: InvestigationStatus[] = [
+  InvestigationStatus.NEW,
+  InvestigationStatus.VALIDATING,
+  InvestigationStatus.READY_FOR_ASSIGNMENT,
+  ...OFFICE_ENTRY_STATUSES,
+];
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -80,6 +112,9 @@ export class SubmissionsService {
     return {
       formVersionId: form.versionId,
       version: form.version,
+      templateId: form.templateId,
+      nameAr: form.nameAr,
+      nameEn: form.nameEn,
       schema: form.schema,
       submission: current,
     };
@@ -102,6 +137,203 @@ export class SubmissionsService {
       investigationId,
     );
 
+    return this.writeDraft(tenantId, investigationId, form.versionId, dto.answers);
+  }
+
+  /**
+   * The office types in a paper form the investigator brought back.
+   *
+   * WHY THIS IS NOT `saveDraft`. That route is the investigator's, and it only
+   * lets them touch their own case. Here the writer is a web user, so it goes
+   * through the same visibility rule as every other case read (a coordinator
+   * cannot fill in a case they cannot see), and it is held by
+   * `investigations.edit` — the QC role deliberately lacks it, because the
+   * person who checks the answers must not be the person who typed them.
+   *
+   * IT WRITES A DRAFT, NEVER A SUBMISSION, and it never moves the case. A
+   * submitted attempt is evidence: if the latest attempt is SUBMITTED (the
+   * case is in rework) a new draft attempt is opened beside it, exactly as the
+   * investigator's own draft save does.
+   *
+   * Answers are not refused for being incomplete — a reviewer saves as they
+   * go — but the problems a submission would hit are returned as `warnings`
+   * so the screen can show them before anyone is surprised at submit time.
+   */
+  async saveOfficeAnswers(
+    tenantId: string,
+    investigationId: string,
+    principal: AuthenticatedPrincipal,
+    dto: SaveSubmissionDto,
+  ) {
+    const investigation = await this.investigations.assertVisible(
+      tenantId,
+      investigationId,
+      principal,
+    );
+
+    if (!OFFICE_ENTRY_STATUSES.includes(investigation.status)) {
+      throw new BadRequestException({
+        message:
+          'لا يمكن إدخال بيانات الاستمارة في هذه المرحلة؛ الاستعلام يجب أن يكون مُسندًا لباحث ولم يُسلَّم للمراجعة بعد - ' +
+          'The form can only be entered while the case is with an investigator, before it goes to review',
+        errorCode: 'FORM_ENTRY_NOT_OPEN',
+        status: investigation.status,
+      });
+    }
+
+    const form = await this.forms.schemaForInvestigation(
+      tenantId,
+      investigationId,
+    );
+
+    // Only keys the form asks for. A typo'd or stale key from the browser
+    // would otherwise sit in the answers forever, rendered by nothing.
+    const known = new Set(
+      form.schema.sections.flatMap((s) => s.fields.map((f) => f.key)),
+    );
+    const answers = Object.fromEntries(
+      Object.entries(dto.answers ?? {}).filter(([key]) => known.has(key)),
+    );
+
+    const submission = await this.writeDraft(
+      tenantId,
+      investigationId,
+      form.versionId,
+      answers,
+    );
+
+    await this.audit.log({
+      tenantId,
+      action: 'FORM_ANSWERS_ENTERED',
+      category: 'FORM',
+      actorType: principal.principalType,
+      actorId: principal.id,
+      actorName: principal.fullName,
+      entityType: 'Investigation',
+      entityId: investigationId,
+      entityLabel: investigation.caseNumber,
+      metadata: { attempt: submission.attempt, fields: Object.keys(answers).length },
+    });
+
+    return {
+      submission,
+      warnings: validateAnswers(form.schema, answers).problems,
+    };
+  }
+
+  /**
+   * Choose which form a case is answered on.
+   *
+   * A case gets its investigation type's form by default. The office can put
+   * it on another — a work form on a case whose type defaults to residence —
+   * and the choice is stored as the case's pinned `formVersionId`, so every
+   * reader (the investigator's form, QC, the report) follows it without
+   * knowing a choice was made. Assignment keeps an existing pin, so the
+   * choice survives being assigned or reassigned.
+   *
+   * An unsubmitted DRAFT answers the old form's questions. It is never carried
+   * across silently: the caller must say `discardDraft`, and the screen asks
+   * the user first. A submitted attempt cannot be orphaned at all — the
+   * status check refuses before that point.
+   */
+  async chooseForm(
+    tenantId: string,
+    investigationId: string,
+    principal: AuthenticatedPrincipal,
+    dto: ChooseFormDto,
+  ) {
+    const investigation = await this.investigations.assertVisible(
+      tenantId,
+      investigationId,
+      principal,
+    );
+
+    if (!FORM_CHOICE_STATUSES.includes(investigation.status)) {
+      throw new BadRequestException({
+        message:
+          'لا يمكن تغيير الاستمارة بعد تسليم الاستعلام - ' +
+          'The form cannot be changed once the case has been submitted',
+        errorCode: 'FORM_CHOICE_CLOSED',
+        status: investigation.status,
+      });
+    }
+
+    const template = await this.prisma.formTemplate.findFirst({
+      where: { tenantId, id: dto.formTemplateId, isActive: true },
+      select: { id: true, code: true, publishedVersionId: true },
+    });
+    if (!template?.publishedVersionId) {
+      throw new NotFoundException(
+        'لا يوجد إصدار منشور لهذا النموذج - This form has no published version',
+      );
+    }
+
+    const submissions = await this.prisma.formSubmission.findMany({
+      where: { tenantId, investigationId },
+      select: { id: true, status: true, answers: true, formVersionId: true },
+    });
+
+    if (submissions.some((s) => s.status !== SubmissionStatus.DRAFT)) {
+      throw new BadRequestException({
+        message:
+          'لا يمكن تغيير الاستمارة؛ يوجد تسليم سابق عليها - ' +
+          'The form cannot be changed; a submission was already made on it',
+        errorCode: 'FORM_CHOICE_CLOSED',
+      });
+    }
+
+    const drafts = submissions.filter(
+      (s) => s.formVersionId !== template.publishedVersionId,
+    );
+    const draftHasAnswers = drafts.some(
+      (d) => Object.keys((d.answers ?? {}) as object).length > 0,
+    );
+    if (draftHasAnswers && !dto.discardDraft) {
+      throw new ConflictException({
+        message:
+          'توجد بيانات مدخلة على الاستمارة الحالية وسيتم حذفها - ' +
+          'Answers entered on the current form would be discarded',
+        errorCode: 'FORM_DRAFT_HAS_ANSWERS',
+      });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      if (drafts.length > 0) {
+        await tx.formSubmission.deleteMany({
+          where: { tenantId, id: { in: drafts.map((d) => d.id) } },
+        });
+      }
+      await tx.investigation.update({
+        where: { id: investigationId },
+        data: { formVersionId: template.publishedVersionId },
+      });
+    });
+
+    await this.audit.log({
+      tenantId,
+      action: 'CASE_FORM_CHOSEN',
+      category: 'FORM',
+      actorType: principal.principalType,
+      actorId: principal.id,
+      actorName: principal.fullName,
+      entityType: 'Investigation',
+      entityId: investigationId,
+      entityLabel: investigation.caseNumber,
+      oldValue: { formVersionId: investigation.formVersionId },
+      newValue: { formVersionId: template.publishedVersionId, form: template.code },
+      metadata: { draftsDiscarded: drafts.length },
+    });
+
+    return this.getForInvestigation(tenantId, investigationId, principal);
+  }
+
+  /** Update the open draft, or open a new attempt as one. */
+  private async writeDraft(
+    tenantId: string,
+    investigationId: string,
+    formVersionId: string,
+    answers: Record<string, unknown>,
+  ) {
     const open = await this.prisma.formSubmission.findFirst({
       where: {
         tenantId,
@@ -114,7 +346,7 @@ export class SubmissionsService {
     if (open) {
       return this.prisma.formSubmission.update({
         where: { id: open.id },
-        data: { answers: dto.answers as never },
+        data: { answers: answers as never },
       });
     }
 
@@ -127,10 +359,10 @@ export class SubmissionsService {
       data: {
         tenantId,
         investigationId,
-        formVersionId: form.versionId,
+        formVersionId,
         attempt: (lastAttempt._max.attempt ?? 0) + 1,
         status: SubmissionStatus.DRAFT,
-        answers: dto.answers as never,
+        answers: answers as never,
       },
     });
   }
@@ -200,33 +432,49 @@ export class SubmissionsService {
     });
 
     const submission = await this.prisma.$transaction(async (tx) => {
-      // Everything before this attempt becomes history.
+      // The open draft, if any, IS this attempt — it was opened for it, by the
+      // handset or by the office typing in the paper form. It becomes the
+      // submission. Creating a fresh row under the same attempt number would
+      // collide with the draft on the (investigationId, attempt) unique key;
+      // with no draft, this is the next attempt after the last one.
+      const draft = await tx.formSubmission.findFirst({
+        where: { tenantId, investigationId, status: SubmissionStatus.DRAFT },
+        orderBy: { attempt: 'desc' },
+        select: { id: true },
+      });
+
+      // Everything else becomes history.
       await tx.formSubmission.updateMany({
         where: {
           tenantId,
           investigationId,
           status: { not: SubmissionStatus.SUPERSEDED },
+          ...(draft ? { id: { not: draft.id } } : {}),
         },
         data: { status: SubmissionStatus.SUPERSEDED },
       });
 
-      const created = await tx.formSubmission.create({
-        data: {
-          tenantId,
-          investigationId,
-          formVersionId: form.versionId,
-          attempt: lastAttempt._max.attempt ?? 1,
-          status: SubmissionStatus.SUBMITTED,
-          answers: dto.answers as never,
-          autoValidation: autoValidation as never,
-          submittedByType: principal.principalType,
-          submittedById: principal.id,
-          submittedAt: new Date(),
-          clientSubmissionId: dto.clientSubmissionId,
-        },
-      });
+      const submitted = {
+        formVersionId: form.versionId,
+        status: SubmissionStatus.SUBMITTED,
+        answers: dto.answers as never,
+        autoValidation: autoValidation as never,
+        submittedByType: principal.principalType,
+        submittedById: principal.id,
+        submittedAt: new Date(),
+        clientSubmissionId: dto.clientSubmissionId,
+      };
 
-      return created;
+      return draft
+        ? tx.formSubmission.update({ where: { id: draft.id }, data: submitted })
+        : tx.formSubmission.create({
+            data: {
+              ...submitted,
+              tenantId,
+              investigationId,
+              attempt: (lastAttempt._max.attempt ?? 0) + 1,
+            },
+          });
     });
 
     // The case moves through the machine, never by direct assignment. The

@@ -1,490 +1,287 @@
-import type { FormSchema } from '../../src/forms/form-schema';
+import type {
+  FormField,
+  FormOption,
+  FormSchema,
+  FormSection,
+} from '../../src/forms/form-schema';
 
 /**
- * The two forms a demo tenant starts with.
+ * The two inquiry forms a tenant starts with: residence (نموذج استعلام عن سكن
+ * العميل) and work (نموذج استعلام عن عمل العميل).
  *
- * Written as real field-verification forms rather than placeholders, because
- * they are what demonstrates the conditional-logic engine: the residence form's
- * "customer not found" branch is exactly the example the brief gives, and it
- * only reads as a feature when the follow-up questions are the ones an
- * investigator would actually be asked.
+ * They follow the paper forms the agency already uses, field for field and in
+ * the same order, because the same definition renders three ways: the
+ * investigator's form, the on-screen sheet a reviewer types the paper into,
+ * and the blank sheet printed for the investigator to fill in by hand. If the
+ * order drifted from the paper, a reviewer transcribing it would be hunting
+ * for every answer.
+ *
+ * WHAT IS NOT HERE. The customer's name, phone numbers, case number and the
+ * address the bank sent are already on the case, so the sheet prints them in
+ * its header; asking for them again would invite two versions of one fact.
+ * The office stamp is a box on paper and has no electronic answer.
+ *
+ * MOST FIELDS ARE OPTIONAL ON PURPOSE. The real forms are full of "لم يحدد"
+ * (not stated): a company owner who will not give the capital is a finding,
+ * not a missing answer. Free-text cells therefore stay free text, even where
+ * a date or number would be tidier, so "لم يحدد" and "لم يتم الدخول" can be
+ * written into them.
+ *
+ * Every choice row is RADIO — exactly one box ticked per line, as on paper.
+ * The sheet draws them as tick boxes.
  */
+
+// ─── Builders ───────────────────────────────────────────────────────────────
+
+const opt = (value: string, labelAr: string, labelEn: string): FormOption => ({
+  value,
+  labelAr,
+  labelEn,
+});
+
+const YES_NO: FormOption[] = [
+  opt('YES', 'نعم', 'Yes'),
+  opt('NO', 'لا', 'No'),
+];
+
+function text(
+  key: string,
+  labelAr: string,
+  labelEn: string,
+  width = 6,
+): FormField {
+  return { key, type: 'TEXT', labelAr, labelEn, width };
+}
+
+function note(key: string, labelAr: string, labelEn: string): FormField {
+  return { key, type: 'LONG_TEXT', labelAr, labelEn, width: 12 };
+}
+
+function choice(
+  key: string,
+  labelAr: string,
+  labelEn: string,
+  options: FormOption[],
+  width = 12,
+): FormField {
+  return { key, type: 'RADIO', labelAr, labelEn, options, width };
+}
+
+function section(
+  key: string,
+  titleAr: string,
+  titleEn: string,
+  fields: FormField[],
+): FormSection {
+  return { key, titleAr, titleEn, fields };
+}
+
+/** The signature row at the foot of both forms. */
+function signOff(): FormSection {
+  return section('signOff', 'التوقيعات', 'Sign-off', [
+    text('investigatorName', 'اسم المستعلم', 'Investigator', 4),
+    text('reviewerName', 'اسم المراجع', 'Reviewer', 4),
+    text('followUpName', 'اسم المتابع', 'Follow-up officer', 4),
+    { key: 'inquiryDate', type: 'DATE', labelAr: 'تاريخ الاستعلام', labelEn: 'Inquiry date', width: 4 },
+    { key: 'inquiryTime', type: 'TIME', labelAr: 'وقت الاستعلام', labelEn: 'Inquiry time', width: 4 },
+  ]);
+}
+
+// ─── Residence ──────────────────────────────────────────────────────────────
 
 export const RESIDENCE_FORM_SCHEMA: FormSchema = {
   sections: [
-    {
-      key: 'visit',
-      titleAr: 'بيانات الزيارة',
-      titleEn: 'Visit Details',
-      fields: [
-        {
-          key: 'visitDate',
-          type: 'DATE',
-          labelAr: 'تاريخ الزيارة',
-          labelEn: 'Visit Date',
-          required: true,
-          width: 6,
-        },
-        {
-          key: 'visitTime',
-          type: 'TIME',
-          labelAr: 'وقت الزيارة',
-          labelEn: 'Visit Time',
-          required: true,
-          width: 6,
-        },
-        {
-          key: 'addressFound',
-          type: 'RADIO',
-          labelAr: 'هل تم العثور على العنوان؟',
-          labelEn: 'Was the address found?',
-          required: true,
-          options: [
-            { value: 'YES', labelAr: 'نعم', labelEn: 'Yes' },
-            { value: 'NO', labelAr: 'لا', labelEn: 'No' },
-          ],
-        },
-        {
-          key: 'addressNotFoundReason',
-          type: 'LONG_TEXT',
-          labelAr: 'سبب عدم العثور على العنوان',
-          labelEn: 'Why the address could not be found',
-          required: true,
-          visibleWhen: [{ field: 'addressFound', operator: 'EQUALS', value: 'NO' }],
-          validation: { minLength: 10, maxLength: 1000 },
-        },
-        {
-          key: 'gpsLocation',
-          type: 'GPS',
-          labelAr: 'إحداثيات الموقع',
-          labelEn: 'GPS Coordinates',
-          required: true,
-          hintAr: 'سجّل الإحداثيات وأنت أمام العنوان',
-          hintEn: 'Record while standing at the address',
-        },
-      ],
-    },
-    {
-      key: 'contact',
-      titleAr: 'بيانات المقابلة',
-      titleEn: 'Contact',
-      visibleWhen: [{ field: 'addressFound', operator: 'EQUALS', value: 'YES' }],
-      fields: [
-        {
-          key: 'customerFound',
-          type: 'RADIO',
-          labelAr: 'هل تمت مقابلة العميل؟',
-          labelEn: 'Was the customer met?',
-          required: true,
-          options: [
-            { value: 'YES', labelAr: 'نعم', labelEn: 'Yes' },
-            { value: 'NO', labelAr: 'لا', labelEn: 'No' },
-          ],
-        },
-        // The branch the brief names explicitly: when the customer was not
-        // found, ask who was spoken to instead.
-        {
-          key: 'personContacted',
-          type: 'TEXT',
-          labelAr: 'اسم من تمت مقابلته',
-          labelEn: 'Person contacted',
-          required: true,
-          visibleWhen: [{ field: 'customerFound', operator: 'EQUALS', value: 'NO' }],
-          validation: { minLength: 3, maxLength: 200 },
-        },
-        {
-          key: 'relationship',
-          type: 'DROPDOWN',
-          labelAr: 'صلة القرابة',
-          labelEn: 'Relationship',
-          required: true,
-          visibleWhen: [{ field: 'customerFound', operator: 'EQUALS', value: 'NO' }],
-          options: [
-            { value: 'SPOUSE', labelAr: 'الزوج/الزوجة', labelEn: 'Spouse' },
-            { value: 'PARENT', labelAr: 'أب/أم', labelEn: 'Parent' },
-            { value: 'SIBLING', labelAr: 'أخ/أخت', labelEn: 'Sibling' },
-            { value: 'CHILD', labelAr: 'ابن/ابنة', labelEn: 'Child' },
-            { value: 'RELATIVE', labelAr: 'قريب', labelEn: 'Relative' },
-            { value: 'NEIGHBOUR', labelAr: 'جار', labelEn: 'Neighbour' },
-            { value: 'DOORMAN', labelAr: 'بواب', labelEn: 'Doorman' },
-            { value: 'OTHER', labelAr: 'أخرى', labelEn: 'Other' },
-          ],
-        },
-        {
-          key: 'unavailableReason',
-          type: 'LONG_TEXT',
-          labelAr: 'سبب عدم تواجد العميل',
-          labelEn: 'Why the customer was unavailable',
-          required: true,
-          visibleWhen: [{ field: 'customerFound', operator: 'EQUALS', value: 'NO' }],
-          validation: { minLength: 5, maxLength: 1000 },
-        },
-        {
-          key: 'returnDate',
-          type: 'DATE',
-          labelAr: 'موعد العودة المقترح',
-          labelEn: 'Suggested return date',
-          visibleWhen: [{ field: 'customerFound', operator: 'EQUALS', value: 'NO' }],
-        },
-      ],
-    },
-    {
-      key: 'residence',
-      titleAr: 'بيانات السكن',
-      titleEn: 'Residence',
-      visibleWhen: [{ field: 'addressFound', operator: 'EQUALS', value: 'YES' }],
-      fields: [
-        {
-          key: 'residenceType',
-          type: 'DROPDOWN',
-          labelAr: 'نوع السكن',
-          labelEn: 'Residence Type',
-          required: true,
-          options: [
-            { value: 'APARTMENT', labelAr: 'شقة', labelEn: 'Apartment' },
-            { value: 'VILLA', labelAr: 'فيلا', labelEn: 'Villa' },
-            { value: 'DUPLEX', labelAr: 'دوبلكس', labelEn: 'Duplex' },
-            { value: 'ROOM', labelAr: 'غرفة', labelEn: 'Room' },
-            { value: 'OTHER', labelAr: 'أخرى', labelEn: 'Other' },
-          ],
-          width: 6,
-        },
-        {
-          key: 'ownership',
-          type: 'RADIO',
-          labelAr: 'ملكية السكن',
-          labelEn: 'Ownership',
-          required: true,
-          options: [
-            { value: 'OWNED', labelAr: 'ملك', labelEn: 'Owned' },
-            { value: 'RENTED', labelAr: 'إيجار', labelEn: 'Rented' },
-            { value: 'FAMILY', labelAr: 'ملك العائلة', labelEn: 'Family owned' },
-          ],
-          width: 6,
-        },
-        {
-          key: 'yearsAtAddress',
-          type: 'NUMBER',
-          labelAr: 'عدد سنوات الإقامة',
-          labelEn: 'Years at this address',
-          validation: { min: 0, max: 100 },
-          width: 6,
-        },
-        {
-          key: 'floorNumber',
-          type: 'NUMBER',
-          labelAr: 'رقم الدور',
-          labelEn: 'Floor number',
-          validation: { min: 0, max: 60 },
-          width: 6,
-        },
-        {
-          key: 'buildingCondition',
-          type: 'RATING',
-          labelAr: 'تقييم حالة المبنى',
-          labelEn: 'Building condition',
-          scale: 5,
-          required: true,
-        },
-        {
-          key: 'addressMatches',
-          type: 'RADIO',
-          labelAr: 'هل يطابق العنوان بيانات الطلب؟',
-          labelEn: 'Does the address match the application?',
-          required: true,
-          options: [
-            { value: 'YES', labelAr: 'مطابق', labelEn: 'Matches' },
-            { value: 'PARTIAL', labelAr: 'مطابق جزئيًا', labelEn: 'Partially matches' },
-            { value: 'NO', labelAr: 'غير مطابق', labelEn: 'Does not match' },
-          ],
-        },
-        {
-          key: 'correctedAddress',
-          type: 'ADDRESS',
-          labelAr: 'العنوان الصحيح',
-          labelEn: 'Corrected address',
-          required: true,
-          visibleWhen: [
-            { field: 'addressMatches', operator: 'IN', value: ['PARTIAL', 'NO'] },
-          ],
-          validation: { minLength: 10, maxLength: 500 },
-        },
-      ],
-    },
-    {
-      key: 'evidence',
-      titleAr: 'الأدلة',
-      titleEn: 'Evidence',
-      fields: [
-        {
-          key: 'residenceFrontPhoto',
-          type: 'PHOTO',
-          labelAr: 'صورة واجهة السكن',
-          labelEn: 'Residence front photo',
-          required: true,
-          mediaCategoryCode: 'RESIDENCE_FRONT',
-          minCount: 1,
-          maxCount: 3,
-        },
-        {
-          key: 'entrancePhoto',
-          type: 'PHOTO',
-          labelAr: 'صورة المدخل',
-          labelEn: 'Entrance photo',
-          required: true,
-          mediaCategoryCode: 'RESIDENCE_ENTRANCE',
-          minCount: 1,
-          maxCount: 2,
-        },
-        {
-          key: 'streetPhoto',
-          type: 'PHOTO',
-          labelAr: 'صورة الشارع',
-          labelEn: 'Street photo',
-          mediaCategoryCode: 'STREET_VIEW',
-          maxCount: 2,
-        },
-        {
-          key: 'customerSignature',
-          type: 'SIGNATURE',
-          labelAr: 'توقيع من تمت مقابلته',
-          labelEn: 'Signature of the person met',
-          mediaCategoryCode: 'SIGNATURE',
-        },
-      ],
-    },
-    {
-      key: 'conclusion',
-      titleAr: 'الخلاصة',
-      titleEn: 'Conclusion',
-      fields: [
-        {
-          key: 'recommendation',
-          type: 'RADIO',
-          labelAr: 'التوصية',
-          labelEn: 'Recommendation',
-          required: true,
-          options: [
-            { value: 'POSITIVE', labelAr: 'إيجابي', labelEn: 'Positive' },
-            { value: 'NEGATIVE', labelAr: 'سلبي', labelEn: 'Negative' },
-            { value: 'INCONCLUSIVE', labelAr: 'غير حاسم', labelEn: 'Inconclusive' },
-          ],
-        },
-        {
-          key: 'investigatorNotes',
-          type: 'LONG_TEXT',
-          labelAr: 'ملاحظات الباحث',
-          labelEn: 'Investigator notes',
-          validation: { maxLength: 2000 },
-        },
-      ],
-    },
+    section('visit', 'بيانات الزيارة', 'Visit details', [
+      text('actualAddress', 'العنوان الفعلي', 'Actual address', 12),
+      text('areaDistrict', 'المنطقة / الحي', 'Area / district'),
+      text('policeCenter', 'المركز', 'Centre'),
+      text('personInterviewed', 'الشخص الذي تمت مقابلته', 'Person interviewed', 12),
+    ]),
+
+    section('areaAndResidence', 'بيانات عن المنطقة والسكن', 'Area and residence', [
+      choice('propertyType', 'نوع العقار', 'Property type', [
+        opt('VILLA', 'فيلا', 'Villa'),
+        opt('TOWER', 'برج', 'Tower'),
+        opt('BUILDING', 'عمارة', 'Apartment building'),
+        opt('HOUSE', 'بيت', 'House'),
+      ], 6),
+      choice('propertyLevel', 'مستوى العقار', 'Property condition', [
+        opt('GOOD', 'جيد', 'Good'),
+        opt('AVERAGE', 'متوسط', 'Average'),
+        opt('OLD', 'قديم', 'Old'),
+        opt('DILAPIDATED', 'متهالك', 'Dilapidated'),
+      ], 6),
+      choice('residenceType', 'نوع السكن', 'Tenure', [
+        opt('OWNED', 'تمليك', 'Owned'),
+        opt('OLD_RENT', 'إيجار قديم', 'Old-law rent'),
+        opt('NEW_RENT', 'إيجار جديد', 'New-law rent'),
+      ], 8),
+      text('residenceDuration', 'مدة الإقامة في السكن', 'Time at this address', 4),
+      choice('residenceAppearance', 'مظهر السكن', 'Appearance', [
+        opt('VERY_GOOD', 'جيد جدًا', 'Very good'),
+        opt('GOOD', 'جيد', 'Good'),
+        opt('NORMAL', 'عادي', 'Ordinary'),
+        opt('POOR', 'ضعيف', 'Poor'),
+      ], 6),
+      choice('furniture', 'الأثاث', 'Furniture', [
+        opt('NEW', 'جديد', 'New'),
+        opt('AVERAGE', 'متوسط', 'Average'),
+        opt('OLD', 'قديم', 'Old'),
+      ], 6),
+      choice('floorArea', 'المساحة', 'Floor area', [
+        opt('UNDER_80', 'أقل من 80 متر', 'Under 80 m²'),
+        opt('FROM_80_TO_100', 'بين 80 و 100 متر', '80–100 m²'),
+        opt('OVER_100', 'أكبر من 100 متر', 'Over 100 m²'),
+      ]),
+      choice('neighbourhood', 'المنطقة', 'Neighbourhood', [
+        opt('UPSCALE', 'راقية', 'Upscale'),
+        opt('AVERAGE', 'متوسطة', 'Average'),
+        opt('POPULAR', 'شعبية', 'Working-class'),
+        opt('INFORMAL', 'عشوائية', 'Informal'),
+      ]),
+      choice('accessibility', 'إمكانية الوصول', 'Ease of access', [
+        opt('EASY', 'سهل', 'Easy'),
+        opt('AVERAGE', 'متوسط', 'Average'),
+        opt('HARD', 'صعب', 'Difficult'),
+      ], 5),
+      choice('carAccess', 'هل يمكن دخول المنطقة بالسيارة', 'Reachable by car', YES_NO, 7),
+      text('nearestLandmark', 'أقرب علامة مميزة', 'Nearest landmark', 12),
+      choice('streetType', 'وصف الشارع', 'Street', [
+        opt('MAIN', 'رئيسي', 'Main road'),
+        opt('SIDE', 'جانبي', 'Side street'),
+        opt('DARB', 'درب', 'Darb'),
+        opt('ALLEY', 'حارة', 'Alley'),
+      ], 7),
+      choice('streetCondition', 'حالة الشارع', 'Street surface', [
+        opt('PAVED', 'ممهد', 'Paved'),
+        opt('UNPAVED', 'غير ممهد', 'Unpaved'),
+      ], 5),
+    ]),
+
+    section('neighbours', 'بيانات من البواب والجيران', 'From the doorman and neighbours', [
+      choice('customerResides', 'هل العميل مقيم في هذا المنزل', 'Does the customer live here', YES_NO, 6),
+      choice('livesWith', 'هل العميل مقيم مع', 'Lives with', [
+        opt('FAMILY', 'عائلته', 'Family'),
+        opt('SPOUSE', 'زوجته', 'Spouse'),
+        opt('ALONE', 'بمفرده', 'Alone'),
+      ], 6),
+      text(
+        'referencePerson',
+        'اسم شخص يمكن الرجوع إليه / أرقام التليفونات الخاصة به',
+        'Reference contact and phone numbers',
+        12,
+      ),
+    ]),
+
+    section('notes', 'الملاحظات', 'Notes', [
+      note('areaNotes', 'ملاحظات عن المنطقة والسكن', 'Notes on the area and residence'),
+      note('customerNotes', 'ملاحظات عن العميل', 'Notes on the customer'),
+      note('investigatorOpinion', 'رأي المستعلم', "Investigator's opinion"),
+    ]),
+
+    signOff(),
   ],
 };
 
+// ─── Work ───────────────────────────────────────────────────────────────────
+
 export const WORKPLACE_FORM_SCHEMA: FormSchema = {
   sections: [
-    {
-      key: 'visit',
-      titleAr: 'بيانات الزيارة',
-      titleEn: 'Visit Details',
-      fields: [
-        {
-          key: 'visitDate',
-          type: 'DATE',
-          labelAr: 'تاريخ الزيارة',
-          labelEn: 'Visit Date',
-          required: true,
-          width: 6,
-        },
-        {
-          key: 'workplaceFound',
-          type: 'RADIO',
-          labelAr: 'هل تم العثور على جهة العمل؟',
-          labelEn: 'Was the workplace found?',
-          required: true,
-          options: [
-            { value: 'YES', labelAr: 'نعم', labelEn: 'Yes' },
-            { value: 'NO', labelAr: 'لا', labelEn: 'No' },
-          ],
-        },
-        {
-          key: 'gpsLocation',
-          type: 'GPS',
-          labelAr: 'إحداثيات الموقع',
-          labelEn: 'GPS Coordinates',
-          required: true,
-        },
-      ],
-    },
-    {
-      key: 'employment',
-      titleAr: 'بيانات التوظيف',
-      titleEn: 'Employment',
-      visibleWhen: [{ field: 'workplaceFound', operator: 'EQUALS', value: 'YES' }],
-      fields: [
-        {
-          key: 'employmentConfirmed',
-          type: 'RADIO',
-          labelAr: 'هل تم تأكيد عمل العميل؟',
-          labelEn: 'Was employment confirmed?',
-          required: true,
-          options: [
-            { value: 'YES', labelAr: 'نعم', labelEn: 'Yes' },
-            { value: 'NO', labelAr: 'لا', labelEn: 'No' },
-          ],
-        },
-        {
-          key: 'confirmedBy',
-          type: 'TEXT',
-          labelAr: 'اسم من أكد المعلومة',
-          labelEn: 'Confirmed by',
-          required: true,
-          visibleWhen: [
-            { field: 'employmentConfirmed', operator: 'EQUALS', value: 'YES' },
-          ],
-          validation: { minLength: 3, maxLength: 200 },
-        },
-        {
-          key: 'confirmerRole',
-          type: 'DROPDOWN',
-          labelAr: 'صفة من أكد المعلومة',
-          labelEn: 'Their role',
-          required: true,
-          visibleWhen: [
-            { field: 'employmentConfirmed', operator: 'EQUALS', value: 'YES' },
-          ],
-          options: [
-            { value: 'HR', labelAr: 'الموارد البشرية', labelEn: 'Human Resources' },
-            { value: 'MANAGER', labelAr: 'مدير مباشر', labelEn: 'Direct manager' },
-            { value: 'OWNER', labelAr: 'صاحب العمل', labelEn: 'Business owner' },
-            { value: 'COLLEAGUE', labelAr: 'زميل', labelEn: 'Colleague' },
-            { value: 'SECURITY', labelAr: 'الأمن', labelEn: 'Security' },
-          ],
-        },
-        {
-          key: 'jobTitle',
-          type: 'TEXT',
-          labelAr: 'المسمى الوظيفي',
-          labelEn: 'Job title',
-          visibleWhen: [
-            { field: 'employmentConfirmed', operator: 'EQUALS', value: 'YES' },
-          ],
-          validation: { maxLength: 120 },
-          width: 6,
-        },
-        {
-          key: 'yearsEmployed',
-          type: 'NUMBER',
-          labelAr: 'عدد سنوات الخدمة',
-          labelEn: 'Years employed',
-          visibleWhen: [
-            { field: 'employmentConfirmed', operator: 'EQUALS', value: 'YES' },
-          ],
-          validation: { min: 0, max: 60 },
-          width: 6,
-        },
-        {
-          key: 'notConfirmedReason',
-          type: 'LONG_TEXT',
-          labelAr: 'سبب عدم التأكيد',
-          labelEn: 'Why it could not be confirmed',
-          required: true,
-          visibleWhen: [
-            { field: 'employmentConfirmed', operator: 'EQUALS', value: 'NO' },
-          ],
-          validation: { minLength: 10, maxLength: 1000 },
-        },
-      ],
-    },
-    {
-      key: 'business',
-      titleAr: 'بيانات المنشأة',
-      titleEn: 'Business Details',
-      visibleWhen: [{ field: 'workplaceFound', operator: 'EQUALS', value: 'YES' }],
-      fields: [
-        {
-          key: 'businessType',
-          type: 'DROPDOWN',
-          labelAr: 'نوع النشاط',
-          labelEn: 'Business type',
-          options: [
-            { value: 'OFFICE', labelAr: 'مكتب', labelEn: 'Office' },
-            { value: 'FACTORY', labelAr: 'مصنع', labelEn: 'Factory' },
-            { value: 'SHOP', labelAr: 'محل تجاري', labelEn: 'Retail shop' },
-            { value: 'CLINIC', labelAr: 'عيادة', labelEn: 'Clinic' },
-            { value: 'GOVERNMENT', labelAr: 'جهة حكومية', labelEn: 'Government' },
-            { value: 'OTHER', labelAr: 'أخرى', labelEn: 'Other' },
-          ],
-          width: 6,
-        },
-        {
-          key: 'approxStaffCount',
-          type: 'NUMBER',
-          labelAr: 'عدد الموظفين التقريبي',
-          labelEn: 'Approximate staff count',
-          validation: { min: 1, max: 100000 },
-          width: 6,
-        },
-        {
-          key: 'workingHours',
-          type: 'TEXT',
-          labelAr: 'مواعيد العمل',
-          labelEn: 'Working hours',
-          validation: { maxLength: 120 },
-        },
-      ],
-    },
-    {
-      key: 'evidence',
-      titleAr: 'الأدلة',
-      titleEn: 'Evidence',
-      fields: [
-        {
-          key: 'workplaceFrontPhoto',
-          type: 'PHOTO',
-          labelAr: 'صورة واجهة جهة العمل',
-          labelEn: 'Workplace front photo',
-          required: true,
-          mediaCategoryCode: 'WORKPLACE_FRONT',
-          minCount: 1,
-          maxCount: 3,
-        },
-        {
-          key: 'workplaceInteriorPhoto',
-          type: 'PHOTO',
-          labelAr: 'صورة داخلية',
-          labelEn: 'Interior photo',
-          mediaCategoryCode: 'WORKPLACE_INTERIOR',
-          maxCount: 3,
-        },
-      ],
-    },
-    {
-      key: 'conclusion',
-      titleAr: 'الخلاصة',
-      titleEn: 'Conclusion',
-      fields: [
-        {
-          key: 'recommendation',
-          type: 'RADIO',
-          labelAr: 'التوصية',
-          labelEn: 'Recommendation',
-          required: true,
-          options: [
-            { value: 'POSITIVE', labelAr: 'إيجابي', labelEn: 'Positive' },
-            { value: 'NEGATIVE', labelAr: 'سلبي', labelEn: 'Negative' },
-            { value: 'INCONCLUSIVE', labelAr: 'غير حاسم', labelEn: 'Inconclusive' },
-          ],
-        },
-        {
-          key: 'investigatorNotes',
-          type: 'LONG_TEXT',
-          labelAr: 'ملاحظات الباحث',
-          labelEn: 'Investigator notes',
-          validation: { maxLength: 2000 },
-        },
-      ],
-    },
+    section('visit', 'بيانات الزيارة', 'Visit details', [
+      text('companyName', 'اسم الشركة', 'Company name', 12),
+      text('actualAddress', 'العنوان الفعلي', 'Actual address', 12),
+      text('personInterviewed', 'الشخص الذي تمت مقابلته', 'Person interviewed', 8),
+      text('personInterviewedJob', 'الوظيفة', 'Their position', 4),
+    ]),
+
+    section('company', 'بيانات عن الشركة', 'The company', [
+      text('foundedDate', 'تاريخ التأسيس', 'Founded', 4),
+      text('legalForm', 'الشكل القانوني', 'Legal form', 4),
+      text('capital', 'رأس مال الشركة', 'Capital', 4),
+      text('activityType', 'نوع النشاط', 'Line of business', 12),
+      choice('activityLevel', 'مستوى النشاط', 'Activity level', [
+        opt('EXCELLENT', 'ممتاز', 'Excellent'),
+        opt('GOOD', 'جيد', 'Good'),
+        opt('WEAK', 'ضعيف', 'Weak'),
+        opt('NONE', 'لا يوجد نشاط', 'No activity'),
+      ], 7),
+      choice('businessMovement', 'حركة العمل', 'Business traffic', [
+        opt('HIGH', 'مرتفعة', 'High'),
+        opt('NORMAL', 'عادية', 'Normal'),
+        opt('WEAK', 'ضعيفة', 'Weak'),
+      ], 5),
+      text('employeesCount', 'عدد العاملين بالشركة', 'Number of employees'),
+      text('hasBranches', 'هل يوجد فروع', 'Branches'),
+      text('branchAddresses', 'عناوين الفروع والمخازن', 'Branch and warehouse addresses', 12),
+      text('ownersPartners', 'أسماء أصحاب العمل / الشركاء', 'Owners / partners', 12),
+      text('signatoryName', 'من له حق التوقيع - الاسم', 'Authorised signatory', 8),
+      text('signatoryJob', 'الوظيفة', 'Signatory position', 4),
+      choice('hasSignboard', 'هل توجد لافتة', 'Is there a signboard', YES_NO, 6),
+      choice('knownInArea', 'هل المنشأة معروفة بالمنطقة', 'Known in the area', YES_NO, 6),
+      text('premisesEquipment', 'تجهيزات المنشأة', 'Premises fit-out'),
+      text('premisesArea', 'مساحة المنشأة', 'Premises size'),
+      choice('furnitureCondition', 'حالة الأثاث بالمنشأة', 'Furniture condition', [
+        opt('UPSCALE', 'راقي', 'Upscale'),
+        opt('AVERAGE', 'متوسط', 'Average'),
+        opt('OLD', 'قديم', 'Old'),
+        opt('DILAPIDATED', 'متهالك', 'Dilapidated'),
+      ], 6),
+      choice('accessibility', 'إمكانية الوصول للشركة', 'Ease of access', [
+        opt('EASY', 'سهل', 'Easy'),
+        opt('NORMAL', 'عادي', 'Normal'),
+        opt('HARD', 'صعب', 'Difficult'),
+      ], 6),
+      text('propertyRelation', 'العلاقة القانونية للشركة بالعقار', 'Legal tenure of the premises'),
+      text('occupancyDate', 'تاريخ شغل الشركة للعقار محل النشاط', 'Occupying the premises since'),
+    ]),
+
+    section('customer', 'بيانات عن العميل', 'The customer', [
+      text('customerJob', 'وظيفة العميل', "Customer's position", 8),
+      text('hiringDate', 'تاريخ التعيين', 'Hired', 4),
+      choice('contractType', 'نوع العقد', 'Contract', [
+        opt('TEMPORARY', 'مؤقت', 'Temporary'),
+        opt('ANNUAL', 'سنوي', 'Annual'),
+        opt('PERMANENT', 'دائم', 'Permanent'),
+        opt('NONE', 'لا يوجد', 'None'),
+      ]),
+      text('income', 'دخل العميل', 'Income', 4),
+      text('basicSalary', 'المرتب الأساسي', 'Basic salary', 4),
+      text('commissions', 'عمولات وحوافز', 'Commission and bonuses', 4),
+      text('insuranceNumber', 'الرقم التأميني إن وجد', 'Social insurance number', 4),
+      text('qualification', 'مؤهل العميل', 'Qualification', 4),
+      text('graduationYear', 'سنة التخرج', 'Graduation year', 4),
+      choice('customerPresent', 'هل العميل متواجد أثناء الزيارة', 'Customer present at the visit', YES_NO, 6),
+      choice('customerMet', 'هل تمت مقابلة العميل', 'Customer interviewed', YES_NO, 6),
+    ]),
+
+    section('notes', 'الملاحظات', 'Notes', [
+      note('customerNotes', 'ملاحظات عن العميل', 'Notes on the customer'),
+      note('workNotes', 'ملاحظات عن العمل', 'Notes on the workplace'),
+      note('investigatorOpinion', 'رأي المستعلم', "Investigator's opinion"),
+    ]),
+
+    signOff(),
   ],
 };
+
+/**
+ * Which investigation type each form serves, and what the template is called.
+ * Shared by the demo seed and `seed-inquiry-forms.ts`, which installs these
+ * into tenants that already exist.
+ */
+export const INQUIRY_FORMS = [
+  {
+    typeCode: 'RESIDENCE',
+    templateCode: 'RESIDENCE_FORM',
+    nameAr: 'نموذج استعلام عن سكن العميل',
+    nameEn: 'Customer Residence Inquiry Form',
+    schema: RESIDENCE_FORM_SCHEMA,
+  },
+  {
+    typeCode: 'WORKPLACE',
+    templateCode: 'WORKPLACE_FORM',
+    nameAr: 'نموذج استعلام عن عمل العميل',
+    nameEn: 'Customer Work Inquiry Form',
+    schema: WORKPLACE_FORM_SCHEMA,
+  },
+] as const;

@@ -305,6 +305,7 @@ export class AssignmentsService {
         cityId: true,
         priority: true,
         dueAt: true,
+        formVersionId: true,
         investigationType: { select: { formTemplateId: true } },
       },
     });
@@ -359,7 +360,15 @@ export class AssignmentsService {
 
     // A case is assigned with the form version pinned. Editing the template
     // afterwards cannot change what this investigator is asked.
-    const formVersionId = investigation.investigationType.formTemplateId
+    //
+    // Only the FIRST assignment pins. A case that already carries a form keeps
+    // it through reassignment and rework: the office may have chosen that form
+    // deliberately (a work form on a case whose type defaults to residence),
+    // and re-pinning would also put a rework's second attempt on a different
+    // version from its first.
+    const formVersionId =
+      !investigation.formVersionId &&
+      investigation.investigationType.formTemplateId
       ? ((
           await this.prisma.formTemplate.findFirst({
             where: {

@@ -12,6 +12,7 @@ import { TokenService, SessionOrigin, IssuedTokens } from './token.service';
 import { AuthCacheService } from './auth-cache.service';
 import { PermissionResolverService } from './permission-resolver.service';
 import { AuditService } from '../audit/audit.service';
+import { PushService } from '../push/push.service';
 import { envInt } from '../common/config/env';
 import {
   InvestigatorLoginDto,
@@ -53,6 +54,7 @@ export class AuthService {
     private readonly authCache: AuthCacheService,
     private readonly permissions: PermissionResolverService,
     private readonly audit: AuditService,
+    private readonly push: PushService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -425,6 +427,19 @@ export class AuthService {
       'user logged out of all devices',
     );
 
+    // This is the button somebody presses when a phone is lost. Ending the
+    // sessions without disabling the push registrations would leave case
+    // numbers arriving on the lock screen of a handset in somebody else's
+    // hand — push does not need a session, which is the point of it.
+    //
+    // `disableForPrincipal` swallows its own failures: signing out of every
+    // device must succeed even if this does not.
+    const devices = await this.push.disableForPrincipal(
+      principal.id,
+      principal.principalType,
+      'user logged out of all devices',
+    );
+
     await this.audit.log({
       tenantId: principal.tenantId,
       action: 'AUTH_LOGOUT_ALL',
@@ -433,12 +448,13 @@ export class AuthService {
       actorType: principal.principalType,
       actorId: principal.id,
       actorName: principal.fullName,
-      metadata: { sessionsEnded: count },
+      metadata: { sessionsEnded: count, devicesDisabled: devices },
     });
 
     return {
       success: true,
       sessionsEnded: count,
+      devicesDisabled: devices,
       message: `تم إنهاء ${count} جلسة - Ended ${count} session(s)`,
     };
   }

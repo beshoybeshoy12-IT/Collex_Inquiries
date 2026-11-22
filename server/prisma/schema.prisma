@@ -109,6 +109,7 @@ model Tenant {
   exportJobs         ExportJob[]
   assignments        Assignment[]
   clients            ClientAccount[]
+  deviceTokens       DeviceToken[]
 
   @@index([status])
   @@map("tenants")
@@ -193,6 +194,7 @@ model User {
   exportJobs          ExportJob[]
   reports             Report[]
   clientAccount       ClientAccount?
+  deviceTokens        DeviceToken[]
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -279,9 +281,17 @@ model Investigator {
   lastLocationAt DateTime?
   lastActivityAt DateTime?
 
+  /// Last handset seen at sign-in. `investigators.controller` exposes these and
+  /// the web detail screen shows them, so they stay.
   deviceId       String?
   deviceModel    String?
   devicePlatform String?
+
+  /// SUPERSEDED BY `DeviceToken`, and still written at sign-in so nothing that
+  /// reads it breaks. Do not deliver from this column: it holds one token per
+  /// person, and it only updates at login — a provider token that rotates
+  /// mid-session leaves this pointing at a handset that stopped listening,
+  /// which fails silently. `DeviceToken` is authoritative.
   pushToken      String?
 
   createdAt DateTime  @default(now())
@@ -294,6 +304,7 @@ model Investigator {
   gpsEvents      GpsEvent[]
   documents      InvestigatorDocument[]
   notifications  Notification[]
+  deviceTokens   DeviceToken[]
 
   @@unique([tenantId, employeeCode])
   @@index([tenantId, status])
@@ -1800,6 +1811,71 @@ model Notification {
   @@index([tenantId, investigatorId, readAt])
   @@index([tenantId, createdAt])
   @@map("notifications")
+}
+
+enum PushPlatform {
+  ANDROID
+  IOS
+  WEB
+}
+
+/// One handset registered to receive push notifications.
+///
+/// A SEPARATE TABLE RATHER THAN A COLUMN. `Investigator` carries a `pushToken`
+/// field, written at sign-in, and it is not sufficient for two reasons that
+/// are structural rather than cosmetic: one person may carry two handsets, and
+/// a provider token ROTATES on its own schedule — FCM reissues without asking,
+/// mid-session, with no login to hang the update on. A token captured only at
+/// login is a token that goes stale silently, which is the failure mode where
+/// the notification simply never arrives and nothing looks broken.
+///
+/// The shape follows `Session`: `principalType` plus a nullable id per
+/// principal table, both cascading. Web users can register too — a browser
+/// holds a push subscription the same way a phone does.
+model DeviceToken {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  principalType  PrincipalType
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  investigatorId String?
+  investigator   Investigator? @relation(fields: [investigatorId], references: [id], onDelete: Cascade)
+
+  /// The provider's registration token. UNIQUE GLOBALLY, not per tenant: one
+  /// handset holds one token, and when it re-registers under a different
+  /// account the row must MOVE rather than duplicate. A duplicate would keep
+  /// delivering the previous investigator's case numbers to a phone that
+  /// changed hands.
+  token    String       @unique
+  platform PushPlatform
+
+  /// Sent by the app, so a delivery failure can be traced to a build.
+  appVersion  String?
+  deviceModel String?
+  osVersion   String?
+
+  /// Which language to render the notification in on the lock screen. The
+  /// notification row stores both; the handset picks one and the person
+  /// holding it may not share the locale of whoever triggered it.
+  locale String @default("ar")
+
+  lastSeenAt DateTime @default(now())
+
+  /// Set when the provider reports the token is gone, or when the principal
+  /// signs out of every device. Marked rather than deleted, so "how many
+  /// handsets went silent this month" stays answerable.
+  disabledAt     DateTime?
+  disabledReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, investigatorId])
+  @@index([tenantId, disabledAt])
+  @@map("device_tokens")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

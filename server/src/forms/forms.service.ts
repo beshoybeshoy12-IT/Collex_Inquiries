@@ -398,12 +398,26 @@ export class FormsService {
   async schemaForInvestigation(
     tenantId: string,
     investigationId: string,
-  ): Promise<{ versionId: string; version: number; schema: FormSchema }> {
+  ): Promise<{
+    versionId: string;
+    version: number;
+    schema: FormSchema;
+    templateId: string;
+    nameAr: string;
+    nameEn: string;
+  }> {
     const investigation = await this.prisma.investigation.findFirst({
       where: { tenantId, id: investigationId },
       select: {
         formVersionId: true,
-        formVersion: { select: { id: true, version: true, schema: true } },
+        formVersion: {
+          select: {
+            id: true,
+            version: true,
+            schema: true,
+            template: { select: { id: true, nameAr: true, nameEn: true } },
+          },
+        },
         investigationType: {
           select: {
             formTemplate: {
@@ -427,6 +441,9 @@ export class FormsService {
         versionId: investigation.formVersion.id,
         version: investigation.formVersion.version,
         schema: investigation.formVersion.schema as unknown as FormSchema,
+        templateId: investigation.formVersion.template.id,
+        nameAr: investigation.formVersion.template.nameAr,
+        nameEn: investigation.formVersion.template.nameEn,
       };
     }
 
@@ -444,12 +461,16 @@ export class FormsService {
 
     const fallback = await this.prisma.formVersion.findUniqueOrThrow({
       where: { id: fallbackId },
+      include: { template: { select: { id: true, nameAr: true, nameEn: true } } },
     });
 
     return {
       versionId: fallback.id,
       version: fallback.version,
       schema: fallback.schema as unknown as FormSchema,
+      templateId: fallback.template.id,
+      nameAr: fallback.template.nameAr,
+      nameEn: fallback.template.nameEn,
     };
   }
 }

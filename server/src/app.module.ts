@@ -13,6 +13,7 @@ import { AuditModule } from './audit/audit.module';
 import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { PushModule } from './push/push.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RolesModule } from './roles/roles.module';
 
@@ -68,6 +69,8 @@ import { env, isProduction } from './common/config/env';
     QueueModule,
     StorageModule,
     RealtimeModule,
+    // Before NotificationsModule, which delivers through it.
+    PushModule,
     NotificationsModule,
     RolesModule,
     HealthModule,
