@@ -34,6 +34,7 @@ export const NAVIGATION = [
     children: [
       {
         key: 'cases-all',
+        icon: 'list-ul',
         to: '/investigations',
         labelKey: 'nav.allCases',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -41,6 +42,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-new',
+        icon: 'stars',
         to: '/investigations?statusGroup=NEW',
         labelKey: 'nav.newCases',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -48,6 +50,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-unassigned',
+        icon: 'inbox',
         to: '/investigations?statusGroup=UNASSIGNED',
         labelKey: 'nav.unassigned',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -55,6 +58,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-assigned',
+        icon: 'person-check',
         to: '/investigations?statusGroup=ASSIGNED',
         labelKey: 'nav.assigned',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -62,6 +66,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-progress',
+        icon: 'hourglass-split',
         to: '/investigations?statusGroup=IN_PROGRESS',
         labelKey: 'nav.inProgress',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -69,6 +74,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-submitted',
+        icon: 'send-check',
         to: '/investigations?statusGroup=SUBMITTED',
         labelKey: 'nav.submitted',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -76,6 +82,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-rework',
+        icon: 'arrow-repeat',
         to: '/investigations?statusGroup=REWORK',
         labelKey: 'nav.rework',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -83,6 +90,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-completed',
+        icon: 'check2-circle',
         to: '/investigations?statusGroup=COMPLETED',
         labelKey: 'nav.completed',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -90,6 +98,7 @@ export const NAVIGATION = [
       },
       {
         key: 'cases-overdue',
+        icon: 'alarm',
         to: '/investigations?overdue=true',
         labelKey: 'nav.overdue',
         permissions: [P.INVESTIGATIONS_VIEW],
@@ -107,6 +116,7 @@ export const NAVIGATION = [
     children: [
       {
         key: 'assign',
+        icon: 'person-plus',
         to: '/assignments',
         labelKey: 'nav.assignCases',
         permissions: [P.INVESTIGATIONS_ASSIGN],
@@ -131,6 +141,7 @@ export const NAVIGATION = [
     children: [
       {
         key: 'investigators-list',
+        icon: 'person-vcard',
         to: '/investigators',
         labelKey: 'nav.investigators',
         permissions: [P.INVESTIGATORS_VIEW],
@@ -138,6 +149,7 @@ export const NAVIGATION = [
       },
       {
         key: 'investigators-map',
+        icon: 'geo-alt',
         to: '/investigators/map',
         labelKey: 'nav.liveMap',
         permissions: [P.INVESTIGATORS_VIEW_LOCATION],
@@ -153,12 +165,14 @@ export const NAVIGATION = [
     children: [
       {
         key: 'import-new',
+        icon: 'cloud-arrow-up',
         to: '/imports/new',
         labelKey: 'nav.excelImport',
         permissions: [P.IMPORTS_CREATE],
       },
       {
         key: 'import-history',
+        icon: 'clock-history',
         to: '/imports',
         labelKey: 'nav.importHistory',
         permissions: [P.IMPORTS_VIEW],
@@ -175,6 +189,7 @@ export const NAVIGATION = [
     children: [
       {
         key: 'qc-queue',
+        icon: 'hourglass-top',
         to: '/qc',
         labelKey: 'nav.pendingQc',
         permissions: [P.QC_VIEW],
@@ -183,6 +198,7 @@ export const NAVIGATION = [
       },
       {
         key: 'qc-stats',
+        icon: 'bar-chart-line',
         to: '/qc/statistics',
         labelKey: 'nav.analytics',
         permissions: [P.QC_VIEW],
@@ -215,48 +231,56 @@ export const NAVIGATION = [
     children: [
       {
         key: 'users',
+        icon: 'person-gear',
         to: '/admin/users',
         labelKey: 'nav.users',
         permissions: [P.USERS_VIEW],
       },
       {
         key: 'roles',
+        icon: 'shield-lock',
         to: '/admin/roles',
         labelKey: 'nav.roles',
         permissions: [P.ROLES_VIEW],
       },
       {
         key: 'products',
+        icon: 'box-seam',
         to: '/admin/products',
         labelKey: 'nav.products',
         permissions: [P.PRODUCTS_VIEW],
       },
       {
         key: 'types',
+        icon: 'tags',
         to: '/admin/investigation-types',
         labelKey: 'nav.investigationTypes',
         permissions: [P.INVESTIGATION_TYPES_VIEW],
       },
       {
         key: 'forms',
+        icon: 'ui-checks-grid',
         to: '/admin/forms',
         labelKey: 'nav.forms',
         permissions: [P.FORMS_VIEW],
       },
       {
         key: 'sla',
+        icon: 'stopwatch',
         to: '/admin/sla',
         labelKey: 'nav.sla',
         permissions: [P.SLA_VIEW],
       },
       {
         key: 'settings',
+        icon: 'sliders',
         to: '/admin/settings',
         labelKey: 'nav.settings',
         permissions: [P.SETTINGS_VIEW, P.TENANT_MANAGE],
       },
       {
         key: 'audit',
+        icon: 'journal-text',
         to: '/admin/audit',
         labelKey: 'nav.audit',
         permissions: [P.AUDIT_VIEW],
@@ -283,6 +307,7 @@ export const NAVIGATION = [
     children: [
       {
         key: 'platform-tenants',
+        icon: 'building-gear',
         to: '/platform/tenants',
         labelKey: 'nav.tenants',
         permissions: [],

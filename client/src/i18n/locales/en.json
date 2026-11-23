@@ -5,7 +5,8 @@
     "loading": "Loading…",
     "language": "Language",
     "arabic": "العربية",
-    "english": "English"
+    "english": "English",
+    "menu": "Menu"
   },
   "common": {
     "save": "Save",
@@ -100,7 +101,20 @@
     "signOutEverywhere": "Sign out of every device",
     "lastUsed": "Last used",
     "thisDevice": "This device",
-    "profile": "Profile"
+    "profile": "Profile",
+    "heroTitle": "Field verification you can trust, from assignment to report",
+    "heroText": "One platform for residence and workplace inquiries for banks and lenders: assign investigators, track visits, review quality and deliver reports.",
+    "heroPoint1": "Live tracking of investigators and visits",
+    "heroPoint2": "Electronic and printable paper inquiry forms",
+    "heroPoint3": "Fine-grained permissions and a full audit trail",
+    "account": "My account",
+    "accountDetails": "Account details",
+    "preferences": "Preferences",
+    "permissionsCount": "{{count}} permissions",
+    "showPassword": "Show passwords",
+    "ruleLength": "At least {{count}} characters",
+    "ruleMatch": "New password and confirmation match",
+    "passwordHint": "Changing your password signs you out on every other device; you stay signed in here."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -178,7 +192,13 @@
     "dailyVolume": "Daily volume",
     "created": "Created",
     "workload": "Investigator workload",
-    "noData": "No data for this period"
+    "noData": "No data for this period",
+    "greetMorning": "Good morning",
+    "greetEvening": "Good evening",
+    "greetMorningName": "Good morning, {{name}}",
+    "greetEveningName": "Good evening, {{name}}",
+    "period": "Period",
+    "lastDays": "Last {{count}} days"
   },
   "cases": {
     "title": "Investigations",
@@ -571,7 +591,13 @@
     "formChanged": "Case form changed to: {{name}}",
     "caseForm": "Form for this case:",
     "printBlankOf": "Print blank:",
-    "switchDiscards": "Answers entered on the current form will be discarded."
+    "switchDiscards": "Answers entered on the current form will be discarded.",
+    "handIn": "Submit to QC",
+    "handInConfirm": "Submit the form",
+    "handInHint": "The paper form is handed in for the investigator and the case moves to \"Awaiting QC\". Once QC approves, you can issue the final report or close the case.",
+    "handedIn": "Form submitted; the case is now awaiting QC",
+    "outcome": "Inquiry outcome (as written on the form)",
+    "outcomeNone": "— not stated —"
   },
   "fieldType": {
     "TEXT": "Text",
@@ -854,5 +880,24 @@
     "validation": "Please correct the highlighted fields.",
     "server": "Something went wrong on the server.",
     "unknown": "An unexpected error occurred."
+  },
+  "theme": {
+    "label": "Appearance",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "Match device"
+  },
+  "profileMedia": {
+    "addPhoto": "Add profile photo",
+    "changePhoto": "Change profile photo",
+    "removePhoto": "Remove profile photo",
+    "addCover": "Add cover photo",
+    "changeCover": "Change cover",
+    "removeCover": "Remove cover",
+    "photoUpdated": "Profile photo updated",
+    "coverUpdated": "Cover photo updated",
+    "removed": "Image removed",
+    "badType": "Unsupported file type; use JPG, PNG or WebP",
+    "tooLarge": "The image must be {{mb}} MB or smaller"
   }
 }

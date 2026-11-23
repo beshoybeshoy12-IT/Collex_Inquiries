@@ -9,7 +9,10 @@ import api from '../services/api';
 import { P } from '../utils/permissions';
 import Dropdown from '../components/Dropdown';
 import NotificationBell from '../modules/notifications/NotificationBell';
-import Logo from '../components/Logo';
+import Logo, { Wordmark } from '../components/Logo';
+import ThemeToggle from '../components/ThemeToggle';
+import UserAvatar from '../components/UserAvatar';
+import { useProfileImages } from '../hooks/useProfileImages';
 
 /**
  * Whether a navigation entry describes the page currently on screen.
@@ -52,6 +55,17 @@ function isNavItemActive(to, location, { end = false, siblings = [] } = {}) {
   return true;
 }
 
+/** Two letters for the avatar, ignoring a bracketed "(demo)"-style suffix. */
+function initialsOf(name) {
+  return (name ?? '?')
+    .replace(/\(.*?\)/g, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0] ?? '')
+    .join('');
+}
+
 /**
  * The application shell.
  *
@@ -64,6 +78,10 @@ function isNavItemActive(to, location, { end = false, siblings = [] } = {}) {
  * `/investigations/counts` rather than one per link, and they refresh on a
  * slow interval: they are context, not a live feed, and polling them hard
  * would put a query per user per second on the case table.
+ *
+ * THE SIDEBAR FOLLOWS THE THEME: light on a light page, dark on a dark one.
+ * Its colours are the `--ci-sidebar-*` tokens in app.css, so nothing here
+ * names a colour.
  */
 export default function AppLayout() {
   const { t, i18n } = useTranslation();
@@ -105,43 +123,46 @@ export default function AppLayout() {
 
   const otherLanguage = i18n.language === 'ar' ? 'en' : 'ar';
 
+  // The demo accounts carry "Arabic (تجريبي) / English (demo)"; show the half
+  // in the current language rather than both.
+  const displayName = (() => {
+    const parts = (user?.fullName ?? '').split(' / ');
+    const name = parts.length === 2 ? parts[i18n.language === 'ar' ? 0 : 1] : parts[0];
+    return name.replace(/\(.*?\)/g, '').trim();
+  })();
+  const initials = initialsOf(displayName);
+  const { avatar: photo } = useProfileImages();
+
   return (
-    <div className="d-flex min-vh-100 bg-body-tertiary">
+    <div className="d-flex app-shell">
       {/* Backdrop for the mobile drawer */}
       {sidebarOpen && (
         <div
           className="position-fixed top-0 start-0 w-100 h-100 d-lg-none"
-          style={{ background: 'rgba(0,0,0,.4)', zIndex: 1040 }}
+          style={{ background: 'rgba(2, 6, 23, 0.55)', zIndex: 1040 }}
           onClick={() => setSidebarOpen(false)}
           role="presentation"
         />
       )}
 
       <aside
-        className={`bg-body border-end d-flex flex-column ${
+        className={`app-sidebar d-flex flex-column ${
           sidebarOpen ? 'position-fixed h-100' : 'd-none d-lg-flex'
         }`}
-        style={{ width: 260, zIndex: 1045, insetInlineStart: 0, insetBlockStart: 0 }}
       >
-        <div className="p-3 border-bottom">
-          <div className="d-flex align-items-center gap-2">
-            <span
-              className="d-inline-flex align-items-center justify-content-center rounded-3 text-bg-primary"
-              style={{ width: 34, height: 34 }}
-              aria-hidden="true"
-            >
-              <Logo size={22} />
-            </span>
-            <div className="lh-sm">
-              <div className="fw-semibold">{t('app.name')}</div>
-              <div className="text-body-secondary" style={{ fontSize: '.72rem' }}>
-                {user?.tenant ? localisedName(user.tenant) : t('app.tagline')}
-              </div>
+        <div className="sidebar-brand d-flex align-items-center gap-2">
+          <span className="brand-mark" aria-hidden="true">
+            <Logo size={30} />
+          </span>
+          <div className="lh-sm min-vw-0">
+            <div className="sidebar-strong lh-1 mb-1">
+              <Wordmark height={15} title={t('app.name')} />
             </div>
+            <div className="sidebar-muted truncate">{t('app.tagline')}</div>
           </div>
         </div>
 
-        <nav className="flex-grow-1 overflow-auto p-2" aria-label="main">
+        <nav className="flex-grow-1 overflow-auto px-2 py-3" aria-label="main">
           <ul className="nav nav-pills sidebar-nav flex-column gap-1">
             {navigation.map((item) =>
               item.children ? (
@@ -160,7 +181,7 @@ export default function AppLayout() {
                         }),
                       )
                         ? 'active'
-                        : 'text-body'
+                        : ''
                     }`}
                     onClick={() => toggleSection(item.key)}
                     aria-expanded={openSections.has(item.key)}
@@ -176,7 +197,7 @@ export default function AppLayout() {
                   </button>
 
                   {openSections.has(item.key) && (
-                    <ul className="nav flex-column ms-3 mt-1 gap-1 border-start ps-2">
+                    <ul className="nav nav-sublist flex-column ms-3 mt-1 mb-1 gap-1 ps-2">
                       {item.children.map((child) => {
                         const count = countFor(child.countKey);
                         // Not NavLink's isActive — see isNavItemActive above.
@@ -197,10 +218,13 @@ export default function AppLayout() {
                               // siblings again, on top of whatever this decides.
                               className={() =>
                                 `nav-link nav-sub py-1 px-2 small d-flex align-items-center ${
-                                  active ? 'active' : 'text-body-secondary'
+                                  active ? 'active' : ''
                                 }`
                               }
                             >
+                              {child.icon && (
+                                <i className={`bi bi-${child.icon} me-2`} aria-hidden="true" />
+                              )}
                               <span className="flex-grow-1">{t(child.labelKey)}</span>
                               {count != null && (
                                 <span
@@ -224,9 +248,7 @@ export default function AppLayout() {
                     to={item.to}
                     end={item.end}
                     className={({ isActive }) =>
-                      `nav-link d-flex align-items-center ${
-                        isActive ? 'active' : 'text-body'
-                      }`
+                      `nav-link d-flex align-items-center ${isActive ? 'active' : ''}`
                     }
                   >
                     <i className={`bi bi-${item.icon} me-2`} aria-hidden="true" />
@@ -238,52 +260,78 @@ export default function AppLayout() {
           </ul>
         </nav>
 
-        <div className="p-2 border-top small text-body-secondary">
-          <div className="px-2 py-1 text-truncate" title={user?.fullName}>
-            {user?.fullName}
-          </div>
-          <div className="px-2 text-truncate" style={{ fontSize: '.72rem' }}>
-            {user?.role ? localisedName(user.role) : ''}
-          </div>
-        </div>
       </aside>
 
       <div className="flex-grow-1 d-flex flex-column min-vw-0">
-        <header className="bg-body border-bottom sticky-top">
-          <div className="d-flex align-items-center gap-2 px-3 py-2">
+        <header className="app-header sticky-top d-flex align-items-center">
+          <div className="d-flex align-items-center gap-2 gap-md-3 px-3 px-lg-4 w-100 min-vw-0">
             <button
               type="button"
-              className="btn btn-sm btn-outline-secondary d-lg-none"
+              className="header-icon d-lg-none"
               onClick={() => setSidebarOpen((open) => !open)}
-              aria-label="menu"
+              aria-label={t('app.menu')}
             >
               <i className="bi bi-list" aria-hidden="true" />
             </button>
 
+            {/* Which company this is. On a platform where one person may
+                work for several, it belongs in sight, not in a menu. */}
+            {user?.tenant && (
+              <div className="tenant-chip min-vw-0">
+                <i className="bi bi-buildings" aria-hidden="true" />
+                <span className="truncate">{localisedName(user.tenant)}</span>
+              </div>
+            )}
+
             <div className="flex-grow-1" />
 
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-secondary"
-              onClick={() => setLanguage(otherLanguage)}
-              title={t('app.language')}
-            >
-              {LANGUAGES[otherLanguage].name}
-            </button>
+            <div className="header-tools">
+              <button
+                type="button"
+                className="header-icon"
+                onClick={() => setLanguage(otherLanguage)}
+                title={LANGUAGES[otherLanguage].name}
+                aria-label={LANGUAGES[otherLanguage].name}
+              >
+                <span className="lang-code">{otherLanguage === 'ar' ? 'ع' : 'EN'}</span>
+              </button>
+              <ThemeToggle buttonClassName="header-icon" />
+              <NotificationBell />
+            </div>
 
-            <NotificationBell />
+            <span className="header-divider d-none d-sm-block" aria-hidden="true" />
 
             <Dropdown
-              icon="person-circle"
+              buttonClassName="user-chip"
+              ariaLabel={t('auth.account')}
               label={
-                <span className="d-none d-sm-inline">
-                  {user?.fullName?.split(' ')[0]}
-                </span>
+                <>
+                  <UserAvatar src={photo} initials={initials} />
+                  <span className="user-chip-text d-none d-md-flex">
+                    <span className="user-chip-name truncate">{displayName}</span>
+                    <span className="user-chip-role truncate">
+                      {user?.role ? localisedName(user.role) : ''}
+                    </span>
+                  </span>
+                  <i className="bi bi-chevron-down user-chip-caret" aria-hidden="true" />
+                </>
               }
             >
+              <li className="user-menu-head">
+                <UserAvatar src={photo} initials={initials} className="avatar-lg" />
+                <div className="min-vw-0">
+                  <div className="fw-semibold text-truncate">{user?.fullName}</div>
+                  <div className="text-body-secondary small text-truncate" dir="ltr">
+                    {user?.email}
+                  </div>
+                </div>
+              </li>
+              <li>
+                <hr className="dropdown-divider" />
+              </li>
               <li>
                 <NavLink className="dropdown-item" to="/profile">
-                  <i className="bi bi-person me-2" aria-hidden="true" />
+                  <i className="bi bi-person-circle me-2" aria-hidden="true" />
                   {t('auth.profile')}
                 </NavLink>
               </li>
@@ -300,7 +348,7 @@ export default function AppLayout() {
           </div>
         </header>
 
-        <main className="flex-grow-1 p-3 p-lg-4 min-vw-0">
+        <main className="app-main flex-grow-1 min-vw-0">
           <Outlet />
         </main>
       </div>

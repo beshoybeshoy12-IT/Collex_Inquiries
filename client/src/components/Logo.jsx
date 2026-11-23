@@ -1,50 +1,60 @@
 /**
- * The Collex Inquiries mark.
+ * The Collex logo, from the brand artwork (collex logo.pdf).
  *
- * Drawn rather than shipped as an image, for three reasons that matter here:
- * it inherits `currentColor`, so the same component works white-on-blue in the
- * sidebar tile and solid on a light background without a second asset; it stays
- * sharp at 20px and at 96px; and a print stylesheet or a dark theme cannot get
- * a stale raster.
+ * Outlined from the vector original — the mark's four arcs as drawn, and the
+ * COLLEX wordmark converted from its typeface (FH Lecturis Bold) to shapes —
+ * so it renders identically everywhere with no font to load. Regenerate from
+ * `src/assets/brand/` rather than editing the paths by hand.
  *
- * The geometry is two concentric arcs spiralling inward to a centre dot, each
- * with its gap on the opposite side. It reads as a "C" at small sizes, which is
- * the point.
- *
- * `strokeWidth` is expressed in the 24-unit viewBox, so it scales with the mark
- * instead of thinning out as the icon grows.
+ * Both draw in `currentColor`. Contrast is the caller's choice of colour, which
+ * means one asset serves light mode, dark mode and the white-on-blue tile:
+ * the sidebar sets the colour from its theme tokens, the sign-in hero sets
+ * white, the tile sets white. Do not hard-code a fill here.
  */
+
+const MARK_VIEWBOX = '578.25 520.09 382.42 382.86';
+const MARK_PATH =
+  'M768.73 861.05L769.60 900.96C664.73 900.65 581.25 815.77 580.57 713.03C580.25 663.69 599.08 618.53 630.07 584.60L657.25 614.08C635.10 639.45 621.36 672.32 620.57 708.24C618.78 790.00 683.13 859.64 768.73 861.05Z M958.68 711.77L918.82 711.86C918.01 628.75 851.72 563.43 770.69 562.71C737.47 562.42 706.55 573.25 681.49 591.74L654.29 562.28C685.96 537.76 725.54 523.04 768.38 522.75C872.08 522.09 958.22 606.15 958.68 711.77Z M683.94 711.80C685.13 760.10 722.37 796.62 768.56 797.25C815.59 797.90 854.36 759.94 854.93 713.09C855.50 665.87 818.51 627.19 769.66 626.23L769.62 586.44C839.42 586.77 894.28 642.84 894.93 710.67C895.60 779.85 839.75 836.55 770.77 837.21C702.00 837.87 644.53 782.42 644.18 711.92Z M791.88 712.03C790.58 698.72 781.33 690.49 770.52 690.06C758.47 689.58 748.20 699.01 747.64 710.71C747.06 722.74 755.89 732.54 769.60 733.92L769.49 773.50C734.83 773.24 708.61 745.79 707.96 713.01C707.29 678.76 734.44 650.85 768.36 650.20C802.22 649.56 830.88 676.30 831.20 711.71Z';
+
+const WORDMARK_VIEWBOX = '522.24 766.57 497.46 96.76';
+const WORDMARK_PATH =
+  'M566.57 861.33Q553.63 861.33 543.98 855.39Q534.33 849.45 529.28 838.99Q524.24 828.53 524.24 814.92Q524.24 801.31 529.28 790.85Q534.33 780.39 543.98 774.48Q553.63 768.57 566.57 768.57Q583.52 768.57 594.01 777.73Q604.50 786.89 607.78 802.92L591.13 802.92Q588.53 793.20 582.38 788.47Q576.22 783.73 568.24 783.73Q562.79 783.73 557.96 785.71Q553.14 787.69 549.36 791.47Q545.59 795.24 543.39 801.31Q541.20 807.37 541.20 814.92Q541.20 820.98 542.62 826.12Q544.04 831.26 546.52 834.91Q548.99 838.56 552.30 841.09Q555.61 843.63 559.42 844.87Q563.22 846.11 567.31 846.11Q575.91 846.11 582.28 841.43Q588.66 836.76 591.26 826.99L607.78 826.99Q604.62 842.95 594.07 852.14Q583.52 861.33 566.57 861.33Z M658.32 861.33Q645.38 861.33 635.73 855.39Q626.08 849.45 621.03 838.99Q615.99 828.53 615.99 814.92Q615.99 801.31 621.03 790.85Q626.08 780.39 635.73 774.48Q645.38 768.57 658.32 768.57Q671.25 768.57 680.90 774.48Q690.56 780.39 695.60 790.85Q700.64 801.31 700.64 814.92Q700.64 828.53 695.60 838.99Q690.56 849.45 680.90 855.39Q671.25 861.33 658.32 861.33Z M632.95 814.92Q632.95 828.84 639.97 837.23Q646.99 845.61 658.32 845.61Q669.64 845.61 676.66 837.23Q683.69 828.84 683.69 814.92Q683.69 801.00 676.66 792.64Q669.64 784.29 658.32 784.29Q646.99 784.29 639.97 792.64Q632.95 801.00 632.95 814.92Z M715.24 844.19L715.24 770.68L731.70 770.68L731.70 844.19L715.24 844.19Z M731.70 859.41L731.70 844.19L776.07 844.19L776.07 859.41L731.70 859.41Z M789.37 844.19L789.37 770.68L805.83 770.68L805.83 844.19L789.37 844.19Z M805.83 859.41L805.83 844.19L850.20 844.19L850.20 859.41L805.83 859.41Z M862.21 806.20L862.21 785.90L878.67 785.90L878.67 806.20L862.21 806.20Z M862.21 844.19L862.21 821.42L878.67 821.42L878.67 844.19L862.21 844.19Z M878.67 859.41L878.67 844.19L924.34 844.19L924.34 859.41L878.67 859.41Z M878.67 821.42L878.67 806.20L916.73 806.20L916.73 821.42L878.67 821.42Z M878.67 785.90L878.67 770.68L923.04 770.68L923.04 785.90L878.67 785.90Z M1017.70 859.41L998.08 859.41L974.26 826.61L952.42 859.41L932.55 859.41L964.61 813.31L933.79 770.68L953.47 770.68L975.87 801.62L996.41 770.68L1016.46 770.68L985.52 815.04L1017.70 859.41Z';
+
+function a11y(title) {
+  return title
+    ? { role: 'img', 'aria-label': title }
+    : { 'aria-hidden': 'true', focusable: 'false' };
+}
+
+/** The circular mark. Square; `size` is its width and height in px. */
 export default function Logo({ size = 32, className = '', title }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox={MARK_VIEWBOX}
+      fill="currentColor"
       className={className}
-      role={title ? 'img' : undefined}
-      aria-label={title || undefined}
-      aria-hidden={title ? undefined : 'true'}
-      focusable="false"
+      {...a11y(title)}
     >
-      {/* Outer arc — gap at the upper right. */}
-      <path
-        d="M 21.40 15.42 A 10 10 0 1 1 17.00 3.34"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-      />
-      {/* Inner arc — gap on the opposite side, which is what makes it read as
-          a spiral rather than as two rings. */}
-      <path
-        d="M 6.83 10.12 A 5.5 5.5 0 1 1 9.25 16.76"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-      />
-      {/* Centre. */}
-      <circle cx="12" cy="12" r="2" fill="currentColor" />
+      <path d={MARK_PATH} />
+    </svg>
+  );
+}
+
+/** The COLLEX wordmark. `height` in px; the width follows the artwork. */
+export function Wordmark({ height = 16, className = '', title = 'COLLEX' }) {
+  const [, , w, h] = WORDMARK_VIEWBOX.split(' ').map(Number);
+  return (
+    <svg
+      height={height}
+      width={(height * w) / h}
+      viewBox={WORDMARK_VIEWBOX}
+      fill="currentColor"
+      className={className}
+      {...a11y(title)}
+    >
+      <path d={WORDMARK_PATH} />
     </svg>
   );
 }

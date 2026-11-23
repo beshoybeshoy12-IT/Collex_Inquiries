@@ -683,6 +683,8 @@ export class InvestigationsService {
     id: string,
     principal: AuthenticatedPrincipal,
     dto: TransitionInvestigationDto,
+    /** Set only by the form-submission path; see `TransitionRule.formOnly`. */
+    options: { viaForm?: boolean } = {},
   ) {
     const existing = await this.findVisible(tenantId, id, principal);
 
@@ -691,6 +693,7 @@ export class InvestigationsService {
       dto.status,
       principal.principalType,
       dto.reason,
+      options,
     );
 
     const now = new Date();

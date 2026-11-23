@@ -11,21 +11,214 @@
  *
  *  Bootstrap handles its own half through the RTL build, which `i18n/index.js`
  *  swaps in. This file covers what Bootstrap does not.
+ *
+ *  COLOUR COMES FROM TOKENS, NEVER FROM LITERALS IN RULES. The two blocks
+ *  below redefine Bootstrap's `--bs-*` variables (and a few `--ci-*` of our
+ *  own) for light and for dark; every rule after them reads variables only.
+ *  `data-bs-theme` on <html> picks the block — see `src/theme/index.js`. A hex
+ *  value further down this file is a dark-mode bug waiting to be noticed.
+ *
+ *  Bootstrap compiles some component colours as literals rather than
+ *  variables (`.btn-primary`, form focus, checked inputs, pagination,
+ *  dropdown active). Those are re-pointed at the tokens in "Brand wiring".
  */
 
+/* ─── Tokens: light ──────────────────────────────────────────────────────── */
+
+:root,
+[data-bs-theme='light'] {
+  --bs-body-font-family:
+    'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, 'Noto Naskh Arabic',
+    'Helvetica Neue', Arial, sans-serif;
+
+  --bs-primary: #2f5bea;
+  --bs-primary-rgb: 47, 91, 234;
+  --bs-primary-text-emphasis: #1e3fae;
+  --bs-primary-bg-subtle: #e8eefe;
+  --bs-primary-border-subtle: #c3d1fb;
+  --bs-link-color: #2f5bea;
+  --bs-link-color-rgb: 47, 91, 234;
+  --bs-link-hover-color: #1e3fae;
+  --bs-link-hover-color-rgb: 30, 63, 174;
+
+  /* Surfaces: page < card. The page is a cool grey so white cards lift off
+     it without needing heavy borders or shadows. */
+  --bs-body-bg: #ffffff;
+  --bs-body-bg-rgb: 255, 255, 255;
+  --bs-secondary-bg: #eef1f7;
+  --bs-secondary-bg-rgb: 238, 241, 247;
+  --bs-tertiary-bg: #f4f6fb;
+  --bs-tertiary-bg-rgb: 244, 246, 251;
+
+  --bs-body-color: #1d2433;
+  --bs-body-color-rgb: 29, 36, 51;
+  --bs-emphasis-color: #0b1220;
+  --bs-emphasis-color-rgb: 11, 18, 32;
+  --bs-secondary-color: rgba(29, 36, 51, 0.68);
+  --bs-secondary-color-rgb: 29, 36, 51;
+  --bs-tertiary-color: rgba(29, 36, 51, 0.48);
+  --bs-tertiary-color-rgb: 29, 36, 51;
+
+  --bs-border-color: #e3e8f0;
+  --bs-border-color-translucent: rgba(15, 23, 42, 0.09);
+
+  --bs-focus-ring-color: rgba(47, 91, 234, 0.25);
+
+  --ci-page-bg: #f4f6fb;
+  --ci-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --ci-shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+  --ci-shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.14);
+  --ci-header-bg: rgba(255, 255, 255, 0.85);
+  --ci-table-head-bg: #f7f8fc;
+  --ci-row-hover: #f6f8fd;
+
+  /* Sidebar: a white rail beside the grey page. Contrast of every text
+     token against its background is at least 4.5:1 (WCAG 2.1 AA). */
+  --ci-sidebar-bg: #ffffff;
+  --ci-sidebar-border: #e3e8f0;
+  --ci-sidebar-text: #475066;
+  --ci-sidebar-strong: #0b1220;
+  --ci-sidebar-muted: #6b7489;
+  --ci-sidebar-icon: #7a8399;
+  --ci-sidebar-hover-bg: #f2f5fb;
+  --ci-sidebar-active-bg: #eaf0fe;
+  --ci-sidebar-active-text: #1e3fae;
+  --ci-sidebar-active-icon: #2f5bea;
+  --ci-sidebar-rail: #e3e8f0;
+  --ci-sidebar-badge-bg: #eef1f7;
+  --ci-sidebar-badge-text: #475066;
+  --ci-sidebar-danger-bg: #fdecec;
+  --ci-sidebar-danger-text: #b42318;
+
+  --ci-chart-text: #5b6477;
+  --ci-chart-grid: rgba(15, 23, 42, 0.07);
+  --ci-chart-1: #2f5bea;
+  --ci-chart-2: #16a34a;
+  --ci-chart-3: #dc2626;
+  --ci-chart-4: #f59e0b;
+  --ci-chart-5: #7c3aed;
+}
+
+/* ─── Tokens: dark ───────────────────────────────────────────────────────── */
+
+[data-bs-theme='dark'] {
+  color-scheme: dark;
+
+  /* Lighter than the light-mode primary: the same blue on a near-black
+     surface reads as a hole, not as an accent. */
+  --bs-primary: #5b7cf6;
+  --bs-primary-rgb: 91, 124, 246;
+  --bs-primary-text-emphasis: #a9bcff;
+  --bs-primary-bg-subtle: rgba(91, 124, 246, 0.16);
+  --bs-primary-border-subtle: rgba(91, 124, 246, 0.4);
+  --bs-link-color: #8ea6ff;
+  --bs-link-color-rgb: 142, 166, 255;
+  --bs-link-hover-color: #b6c6ff;
+  --bs-link-hover-color-rgb: 182, 198, 255;
+
+  --bs-body-bg: #111a2b;
+  --bs-body-bg-rgb: 17, 26, 43;
+  --bs-secondary-bg: #18233a;
+  --bs-secondary-bg-rgb: 24, 35, 58;
+  --bs-tertiary-bg: #0b1220;
+  --bs-tertiary-bg-rgb: 11, 18, 32;
+
+  --bs-body-color: #d9e0ec;
+  --bs-body-color-rgb: 217, 224, 236;
+  --bs-emphasis-color: #f5f7fb;
+  --bs-emphasis-color-rgb: 245, 247, 251;
+  --bs-secondary-color: rgba(217, 224, 236, 0.7);
+  --bs-secondary-color-rgb: 217, 224, 236;
+  --bs-tertiary-color: rgba(217, 224, 236, 0.5);
+  --bs-tertiary-color-rgb: 217, 224, 236;
+
+  --bs-border-color: #243049;
+  --bs-border-color-translucent: rgba(255, 255, 255, 0.08);
+
+  --bs-focus-ring-color: rgba(91, 124, 246, 0.35);
+
+  --ci-page-bg: #0b1220;
+  --ci-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --ci-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.35);
+  --ci-shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.5);
+  --ci-header-bg: rgba(17, 26, 43, 0.85);
+  --ci-table-head-bg: #151f33;
+  --ci-row-hover: #16213a;
+
+  --ci-sidebar-bg: #0e1626;
+  --ci-sidebar-border: rgba(255, 255, 255, 0.07);
+  --ci-sidebar-text: rgba(226, 232, 240, 0.78);
+  --ci-sidebar-strong: #f5f7fb;
+  --ci-sidebar-muted: rgba(226, 232, 240, 0.58);
+  --ci-sidebar-icon: rgba(226, 232, 240, 0.6);
+  --ci-sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+  --ci-sidebar-active-bg: rgba(91, 124, 246, 0.2);
+  --ci-sidebar-active-text: #ffffff;
+  --ci-sidebar-active-icon: #a9bcff;
+  --ci-sidebar-rail: rgba(255, 255, 255, 0.1);
+  --ci-sidebar-badge-bg: rgba(255, 255, 255, 0.08);
+  --ci-sidebar-badge-text: rgba(226, 232, 240, 0.88);
+  --ci-sidebar-danger-bg: rgba(248, 113, 113, 0.18);
+  --ci-sidebar-danger-text: #fca5a5;
+
+  --ci-chart-text: #a3adc2;
+  --ci-chart-grid: rgba(255, 255, 255, 0.08);
+  --ci-chart-1: #6d8dff;
+  --ci-chart-2: #34d399;
+  --ci-chart-3: #f87171;
+  --ci-chart-4: #fbbf24;
+  --ci-chart-5: #a78bfa;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────── */
+
 :root {
-  --ci-sidebar-width: 260px;
-  --ci-header-height: 52px;
+  --ci-sidebar-width: 264px;
+  --ci-header-height: 60px;
+  --bs-border-radius: 0.5rem;
+  --bs-border-radius-sm: 0.375rem;
+  --bs-border-radius-lg: 0.75rem;
+  --bs-border-radius-xl: 1rem;
 }
 
 body {
-  /* A font stack that has real Arabic coverage on every platform this runs on.
-     Without Segoe UI / Tahoma first on Windows, Arabic falls back to a face
-     with no proper shaping and the text renders disconnected. */
-  font-family:
-    'Segoe UI', Tahoma, 'Noto Naskh Arabic', 'Helvetica Neue', Arial,
-    sans-serif;
+  font-family: var(--bs-body-font-family);
   font-size: 0.925rem;
+  background-color: var(--ci-page-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme switches animate colours rather than snapping, but never on load. */
+body,
+.card,
+.app-header,
+.form-control,
+.form-select {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.h1,
+.h2,
+.h3,
+.h4,
+.h5,
+.h6 {
+  color: var(--bs-emphasis-color);
+  font-weight: 600;
+}
+
+::selection {
+  background: rgba(var(--bs-primary-rgb), 0.22);
 }
 
 /* Numerals stay Latin even in Arabic. Egyptian banking and collections work
@@ -33,6 +226,140 @@ body {
    to read aloud down a phone line, which is what these are for. */
 [dir='rtl'] {
   font-variant-numeric: lining-nums;
+}
+
+/* Scrollbars that belong to the theme instead of the OS default grey slab. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bs-border-color) transparent;
+}
+
+/* ─── Brand wiring (Bootstrap literals → tokens) ─────────────────────────── */
+
+.btn-primary {
+  --bs-btn-bg: var(--bs-primary);
+  --bs-btn-border-color: var(--bs-primary);
+  --bs-btn-hover-bg: var(--bs-primary-text-emphasis);
+  --bs-btn-hover-border-color: var(--bs-primary-text-emphasis);
+  --bs-btn-active-bg: var(--bs-primary-text-emphasis);
+  --bs-btn-active-border-color: var(--bs-primary-text-emphasis);
+  --bs-btn-disabled-bg: var(--bs-primary);
+  --bs-btn-disabled-border-color: var(--bs-primary);
+  box-shadow: 0 1px 2px rgba(var(--bs-primary-rgb), 0.25);
+}
+
+[data-bs-theme='dark'] .btn-primary {
+  --bs-btn-hover-bg: #4a6cf0;
+  --bs-btn-hover-border-color: #4a6cf0;
+  --bs-btn-active-bg: #4a6cf0;
+  --bs-btn-active-border-color: #4a6cf0;
+}
+
+.btn-outline-primary {
+  --bs-btn-color: var(--bs-primary);
+  --bs-btn-border-color: var(--bs-primary-border-subtle);
+  --bs-btn-hover-bg: var(--bs-primary);
+  --bs-btn-hover-border-color: var(--bs-primary);
+  --bs-btn-active-bg: var(--bs-primary);
+  --bs-btn-active-border-color: var(--bs-primary);
+  --bs-btn-disabled-color: var(--bs-primary);
+  --bs-btn-disabled-border-color: var(--bs-primary-border-subtle);
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: rgba(var(--bs-primary-rgb), 0.6);
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+.form-check-input:checked {
+  background-color: var(--bs-primary);
+  border-color: var(--bs-primary);
+}
+
+.form-check-input:focus {
+  border-color: rgba(var(--bs-primary-rgb), 0.6);
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+.pagination {
+  --bs-pagination-active-bg: var(--bs-primary);
+  --bs-pagination-active-border-color: var(--bs-primary);
+  --bs-pagination-color: var(--bs-body-color);
+  --bs-pagination-hover-color: var(--bs-emphasis-color);
+  --bs-pagination-focus-box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+.dropdown-menu {
+  --bs-dropdown-link-active-bg: var(--bs-primary);
+  --bs-dropdown-border-color: var(--bs-border-color);
+  --bs-dropdown-box-shadow: var(--ci-shadow-lg);
+  --bs-dropdown-border-radius: var(--bs-border-radius-lg);
+  --bs-dropdown-link-hover-bg: var(--bs-tertiary-bg);
+  box-shadow: var(--bs-dropdown-box-shadow);
+  padding: 0.35rem;
+}
+
+.dropdown-item {
+  border-radius: var(--bs-border-radius-sm);
+  padding: 0.45rem 0.7rem;
+}
+
+.nav-pills {
+  --bs-nav-pills-link-active-bg: var(--bs-primary);
+}
+
+.progress {
+  --bs-progress-bar-bg: var(--bs-primary);
+}
+
+/* ─── Soft badges ────────────────────────────────────────────────────────── */
+/*
+ * Badges become a tint with emphasised text instead of a solid block. A case
+ * list shows four or five per row; solid fills turn the table into a
+ * patchwork, and in dark mode a solid yellow or white badge glares.
+ *
+ * `text-bg-light` is the one that matters most for dark mode — it is a fixed
+ * near-white in Bootstrap and is used for neutral chips across the app.
+ */
+
+.badge {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.38em 0.62em;
+  border-radius: 999px;
+}
+
+.badge.text-bg-primary {
+  background-color: var(--bs-primary-bg-subtle) !important;
+  color: var(--bs-primary-text-emphasis) !important;
+}
+
+.badge.text-bg-secondary,
+.badge.text-bg-light,
+.badge.text-bg-dark {
+  background-color: var(--bs-secondary-bg) !important;
+  color: var(--bs-secondary-color) !important;
+}
+
+.badge.text-bg-success {
+  background-color: var(--bs-success-bg-subtle) !important;
+  color: var(--bs-success-text-emphasis) !important;
+}
+
+.badge.text-bg-danger {
+  background-color: var(--bs-danger-bg-subtle) !important;
+  color: var(--bs-danger-text-emphasis) !important;
+}
+
+.badge.text-bg-warning {
+  background-color: var(--bs-warning-bg-subtle) !important;
+  color: var(--bs-warning-text-emphasis) !important;
+}
+
+.badge.text-bg-info {
+  background-color: var(--bs-info-bg-subtle) !important;
+  color: var(--bs-info-text-emphasis) !important;
 }
 
 /* ─── Layout ─────────────────────────────────────────────────────────────── */
@@ -49,53 +376,532 @@ body {
   white-space: nowrap;
 }
 
+.app-shell {
+  min-height: 100vh;
+  background-color: var(--ci-page-bg);
+}
+
+.app-main {
+  padding: 1.25rem;
+}
+
+@media (min-width: 992px) {
+  .app-main {
+    padding: 1.75rem 2rem 2.5rem;
+  }
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────────────────── */
+
+.app-sidebar {
+  width: var(--ci-sidebar-width);
+  background-color: var(--ci-sidebar-bg);
+  border-inline-end: 1px solid var(--ci-sidebar-border);
+  z-index: 1045;
+  inset-inline-start: 0;
+  inset-block-start: 0;
+}
+
+@media (min-width: 992px) {
+  .app-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+}
+
+.app-sidebar .sidebar-brand {
+  height: var(--ci-header-height);
+  padding-inline: 1.1rem;
+  border-block-end: 1px solid var(--ci-sidebar-border);
+}
+
+/* The mark on its own, no tile, in the same colour as the wordmark beside it:
+   near-black on light, near-white on dark. Never a fixed black — on the dark
+   theme that would vanish into the sidebar. */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 36px;
+  block-size: 36px;
+  color: var(--bs-emphasis-color);
+  flex-shrink: 0;
+}
+
+.app-sidebar .brand-mark {
+  color: var(--ci-sidebar-strong);
+}
+
+.app-sidebar .sidebar-footer {
+  border-block-start: 1px solid var(--ci-sidebar-border);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 34px;
+  block-size: 34px;
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--bs-primary-text-emphasis);
+  background: var(--bs-primary-bg-subtle);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.avatar-img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.avatar-sm {
+  inline-size: 26px;
+  block-size: 26px;
+  font-size: 0.7rem;
+}
+
+/* ─── Header ─────────────────────────────────────────────────────────────── */
+
+.app-header {
+  height: var(--ci-header-height);
+  background-color: var(--ci-header-bg);
+  backdrop-filter: saturate(180%) blur(10px);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
+  border-block-end: 1px solid var(--bs-border-color);
+  z-index: 1020;
+}
+
+/* Header buttons: quiet squares that only take a colour on hover. */
+.header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-inline-size: 36px;
+  block-size: 36px;
+  padding-inline: 0.55rem;
+  border-radius: var(--bs-border-radius);
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.header-btn:hover,
+.header-btn[aria-expanded='true'] {
+  color: var(--bs-emphasis-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.header-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+/* The icon tools sit in one tray, so the header reads as two things — the
+   tools and the person — instead of a row of loose boxes. */
+.header-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+}
+
+.header-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 34px;
+  block-size: 34px;
+  padding: 0 0.4rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  font-size: 1.02rem;
+  line-height: 1;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.header-icon:hover,
+.header-icon[aria-expanded='true'] {
+  background: var(--bs-body-bg);
+  color: var(--bs-emphasis-color);
+  box-shadow: var(--ci-shadow-sm);
+}
+
+.header-icon:focus-visible,
+.user-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+/* The unread count, pinned to the bell's corner in either direction. */
+.header-icon .badge {
+  position: absolute;
+  inset-block-start: -4px;
+  inset-inline-end: -4px;
+  font-size: 0.62rem;
+  min-inline-size: 1.15rem;
+  padding: 0.25em 0.4em;
+  border: 2px solid var(--bs-tertiary-bg);
+}
+
+.lang-code {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.header-divider {
+  inline-size: 1px;
+  block-size: 28px;
+  background: var(--bs-border-color);
+}
+
+.tenant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-inline-size: 22rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary-text-emphasis);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 3px 0.5rem 3px 3px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bs-body-color);
+  max-inline-size: 15rem;
+  transition: background-color 0.12s ease;
+}
+
+[dir='rtl'] .user-chip {
+  padding: 3px 3px 3px 0.5rem;
+}
+
+.user-chip:hover,
+.user-chip[aria-expanded='true'] {
+  background: var(--bs-tertiary-bg);
+}
+
+.user-chip-text {
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+  min-inline-size: 0;
+  text-align: start;
+}
+
+.user-chip-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--bs-emphasis-color);
+  max-inline-size: 10rem;
+}
+
+.user-chip-role {
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+  max-inline-size: 10rem;
+}
+
+.user-chip-caret {
+  font-size: 0.7rem;
+  color: var(--bs-tertiary-color);
+}
+
+.user-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem 0.4rem;
+  min-inline-size: 15rem;
+}
+
+.avatar-lg {
+  inline-size: 42px;
+  block-size: 42px;
+  font-size: 1rem;
+}
+
+.avatar-xl {
+  inline-size: 84px;
+  block-size: 84px;
+  font-size: 1.9rem;
+  border: 4px solid var(--bs-body-bg);
+  box-shadow: var(--ci-shadow-md);
+}
+
+/* ─── Profile ────────────────────────────────────────────────────────────── */
+
+/* Not `overflow: hidden`: that clipped the photo menu, which opens past the
+   card's edge, into an empty box. The cover rounds its own top corners. */
+.profile-hero {
+  overflow: visible;
+}
+
+.profile-hero .profile-cover {
+  border-start-start-radius: var(--bs-card-inner-border-radius);
+  border-start-end-radius: var(--bs-card-inner-border-radius);
+  overflow: hidden;
+}
+
+.avatar-edit-wrap .dropdown-menu {
+  z-index: 1060;
+}
+
+.profile-cover {
+  position: relative;
+  block-size: 180px;
+  background:
+    radial-gradient(600px 200px at 85% 0%, rgba(124, 92, 255, 0.45), transparent 60%),
+    linear-gradient(120deg, #1e3fae 0%, #2f5bea 55%, #5b7cf6 100%);
+  background-size: cover;
+  background-position: center;
+}
+
+/* A photo cover gets a soft scrim at the top so the buttons stay legible on
+   any image, light or dark. */
+.profile-cover.has-image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.35), transparent 45%);
+}
+
+.profile-cover-actions {
+  position: absolute;
+  inset-block-start: 0.85rem;
+  inset-inline-end: 0.85rem;
+  display: flex;
+  gap: 0.4rem;
+  z-index: 1;
+}
+
+.cover-btn {
+  --bs-btn-color: #fff;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-color: #fff;
+  --bs-btn-bg: rgba(15, 23, 42, 0.45);
+  --bs-btn-hover-bg: rgba(15, 23, 42, 0.65);
+  --bs-btn-active-bg: rgba(15, 23, 42, 0.7);
+  --bs-btn-border-color: rgba(255, 255, 255, 0.25);
+  --bs-btn-hover-border-color: rgba(255, 255, 255, 0.4);
+  --bs-btn-disabled-color: #fff;
+  --bs-btn-disabled-bg: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.avatar-edit-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.avatar-edit-wrap > .dropdown {
+  position: absolute;
+  inset-block-end: 2px;
+  inset-inline-end: 2px;
+}
+
+.avatar-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 30px;
+  block-size: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--bs-body-bg);
+  background: var(--bs-primary);
+  color: #fff;
+  font-size: 0.8rem;
+  box-shadow: var(--ci-shadow-sm);
+}
+
+.avatar-edit-btn:hover {
+  background: var(--bs-primary-text-emphasis);
+}
+
+.avatar-edit-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+.avatar-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.45);
+  color: #fff;
+}
+
+.profile-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  padding: 0 1.25rem 1.25rem;
+  margin-top: -42px;
+  position: relative;
+  z-index: 1;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding-block: 0.7rem;
+  border-block-end: 1px solid var(--bs-border-color);
+}
+
+.info-row:last-child {
+  border-block-end: 0;
+}
+
+.info-row .info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: 10px;
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-secondary-color);
+  flex-shrink: 0;
+}
+
+.password-rules li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--bs-secondary-color);
+}
+
+.password-rules li.ok {
+  color: var(--bs-success-text-emphasis);
+}
+
 /* ─── Tables ─────────────────────────────────────────────────────────────── */
 
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-hover-bg: var(--ci-row-hover);
+  --bs-table-striped-bg: var(--ci-row-hover);
+  margin-bottom: 0;
+}
+
 .table > :not(caption) > * > * {
-  padding: 0.55rem 0.6rem;
+  padding: 0.7rem 0.75rem;
+  border-bottom-color: var(--bs-border-color);
 }
 
 .table thead th {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: var(--bs-secondary-color);
   font-weight: 600;
   white-space: nowrap;
+  background-color: var(--ci-table-head-bg);
   border-block-end-width: 1px;
+}
+
+.table-hover > tbody > tr {
+  transition: background-color 0.1s ease;
 }
 
 /* Monospace for identifiers, so a mistyped digit in a case number is visible.
    `direction: ltr` because these are always read left to right even inside an
    Arabic page. */
 .mono {
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.85em;
   direction: ltr;
   unicode-bidi: isolate;
   display: inline-block;
 }
 
-/* ─── Cards and stat tiles ───────────────────────────────────────────────── */
+/* ─── Cards, panels and stat tiles ───────────────────────────────────────── */
+
+.card {
+  --bs-card-border-color: var(--bs-border-color);
+  --bs-card-border-radius: var(--bs-border-radius-lg);
+  --bs-card-inner-border-radius: calc(var(--bs-border-radius-lg) - 1px);
+  --bs-card-cap-bg: transparent;
+  --bs-card-cap-padding-y: 0.8rem;
+  --bs-card-cap-padding-x: 1.1rem;
+  --bs-card-spacer-x: 1.1rem;
+  --bs-card-spacer-y: 1.1rem;
+  box-shadow: var(--ci-shadow-sm);
+}
+
+.card-header {
+  font-weight: 600;
+}
+
+/* A card wrapping a table: the table runs edge to edge and keeps the corners. */
+.card > .table-responsive:first-child,
+.card > .table-responsive:last-child {
+  border-radius: var(--bs-card-inner-border-radius);
+}
 
 .stat-card {
+  position: relative;
   border: 1px solid var(--bs-border-color);
-  border-radius: var(--bs-border-radius);
+  border-radius: var(--bs-border-radius-lg);
   background: var(--bs-body-bg);
-  padding: 0.9rem 1rem;
+  padding: 1rem 1.15rem;
   height: 100%;
+  box-shadow: var(--ci-shadow-sm);
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+a:hover > .stat-card,
+.stat-card:is(a):hover {
+  box-shadow: var(--ci-shadow-md);
+  transform: translateY(-1px);
 }
 
 .stat-card__label {
   font-size: 0.78rem;
+  font-weight: 500;
   color: var(--bs-secondary-color);
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.3rem;
 }
 
 .stat-card__value {
-  font-size: 1.6rem;
-  font-weight: 600;
+  font-size: 1.75rem;
+  font-weight: 700;
   line-height: 1.1;
+  color: var(--bs-emphasis-color);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-card__hint {
@@ -103,34 +909,290 @@ body {
   color: var(--bs-tertiary-color);
 }
 
+/* ─── Dashboard ──────────────────────────────────────────────────────────── */
+
+.dash-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* A segmented control: one track, the chosen option raised out of it. */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-secondary-bg);
+  border: 1px solid var(--bs-border-color);
+}
+
+.segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 0.35rem 0.8rem;
+  border-radius: calc(var(--bs-border-radius) - 2px);
+  white-space: nowrap;
+}
+
+.segmented button:hover {
+  color: var(--bs-emphasis-color);
+}
+
+.segmented button.active {
+  background: var(--bs-body-bg);
+  color: var(--bs-emphasis-color);
+  font-weight: 600;
+  box-shadow: var(--ci-shadow-sm);
+}
+
+.segmented button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+.kpi-card {
+  position: relative;
+  height: 100%;
+  padding: 1rem 1.1rem;
+  border-radius: var(--bs-border-radius-lg);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  box-shadow: var(--ci-shadow-sm);
+  overflow: hidden;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+
+a:hover > .kpi-card {
+  box-shadow: var(--ci-shadow-md);
+  transform: translateY(-2px);
+  border-color: var(--bs-primary-border-subtle);
+}
+
+/* Something needs attention: a coloured edge, found by scanning. */
+.kpi-alert::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+}
+
+.kpi-alert-warning::before {
+  background: var(--bs-warning);
+}
+
+.kpi-alert-danger::before {
+  background: var(--bs-danger);
+}
+
+.kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 12px;
+  font-size: 1.15rem;
+}
+
+.kpi-go {
+  color: var(--bs-tertiary-color);
+  font-size: 0.85rem;
+  transition: color 0.15s ease;
+}
+
+[dir='rtl'] .kpi-go {
+  transform: scaleX(-1);
+}
+
+a:hover .kpi-go {
+  color: var(--bs-primary);
+}
+
+.kpi-value {
+  margin-top: 0.85rem;
+  font-size: 1.85rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--bs-emphasis-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-label {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--bs-secondary-color);
+}
+
+.panel-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 8px;
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary-text-emphasis);
+  font-size: 0.9rem;
+}
+
+.ring {
+  position: relative;
+  flex-shrink: 0;
+  inline-size: 116px;
+  block-size: 116px;
+}
+
+.ring svg {
+  transform: rotate(-90deg);
+}
+
+.ring circle {
+  fill: none;
+  stroke-width: 10;
+}
+
+.ring-track {
+  stroke: var(--bs-secondary-bg);
+}
+
+.ring-value {
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.6s ease;
+}
+
+.ring-center,
+.doughnut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.legend-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-tertiary-bg);
+}
+
+.legend-dot {
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dash-subtitle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+  padding-block: 0.75rem 0.35rem;
+  border-block-start: 1px solid var(--bs-border-color);
+}
+
+.tat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-block: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.tat-row .bi {
+  color: var(--bs-tertiary-color);
+  inline-size: 1rem;
+  text-align: center;
+}
+
+.tat-total {
+  margin-top: 0.25rem;
+  padding-top: 0.6rem;
+  border-block-start: 1px dashed var(--bs-border-color);
+}
+
 /* ─── Page header ────────────────────────────────────────────────────────── */
 
 .page-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .page-header h1 {
-  font-size: 1.35rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
 .page-header .subtitle {
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   color: var(--bs-secondary-color);
-  margin: 0.1rem 0 0;
+  margin: 0.2rem 0 0;
+}
+
+/* ─── Tabs ───────────────────────────────────────────────────────────────── */
+/*
+ * Underline tabs instead of Bootstrap's folder tabs: the folder look needs
+ * the tab and the panel below to share a background, and on a grey page with
+ * white cards they never quite do.
+ */
+
+.nav-tabs {
+  --bs-nav-tabs-border-color: var(--bs-border-color);
+  gap: 0.25rem;
+}
+
+.nav-tabs .nav-link {
+  border: 0;
+  border-block-end: 2px solid transparent;
+  border-radius: 0;
+  margin-block-end: -1px;
+  padding: 0.6rem 0.85rem;
+  color: var(--bs-secondary-color);
+  font-weight: 500;
+  background: transparent;
+}
+
+.nav-tabs .nav-link:hover {
+  color: var(--bs-emphasis-color);
+  border-block-end-color: var(--bs-border-color);
+}
+
+.nav-tabs .nav-link.active {
+  color: var(--bs-primary);
+  background: transparent;
+  border-block-end-color: var(--bs-primary);
+  font-weight: 600;
 }
 
 /* ─── Navigation ─────────────────────────────────────────────────────────── */
 
 .nav-pills .nav-link {
   border-radius: var(--bs-border-radius);
-  padding: 0.4rem 0.65rem;
+  padding: 0.45rem 0.7rem;
   font-size: 0.88rem;
 }
 
@@ -140,12 +1202,7 @@ body {
 
 /* ─── Sidebar navigation ─────────────────────────────────────────────────── */
 /*
- * The sidebar previously had no styles of its own, so an active link fell
- * through to Bootstrap's `.nav-link.active` — a solid primary fill. On a
- * top-level item that reads fine; on nine stacked filters it is a wall of
- * blue, and a wall of blue tells you nothing about which one you are on.
- *
- * So: weight instead of fill. The current item gets a tinted background, the
+ * Weight instead of fill. The current item gets a tinted background, the
  * brand colour on its text, and a bar on the leading edge. That bar is what
  * the eye actually finds when scanning a list, and it costs no contrast.
  */
@@ -171,15 +1228,50 @@ body {
 
 .sidebar-nav .nav-link {
   border-radius: var(--bs-border-radius);
-  padding-block: 0.4rem;
+  padding-block: 0.5rem;
+  padding-inline: 0.75rem;
+  color: var(--ci-sidebar-text);
+  font-weight: 500;
   transition:
     background-color 0.12s ease,
     color 0.12s ease;
 }
 
+.sidebar-nav .nav-link .bi {
+  font-size: 1.02rem;
+  color: var(--ci-sidebar-icon);
+  inline-size: 1.15rem;
+  text-align: center;
+  transition: color 0.12s ease;
+}
+
+.sidebar-nav .nav-sub .bi {
+  font-size: 0.92rem;
+}
+
 .sidebar-nav .nav-link.nav-link:hover {
-  background-color: var(--bs-tertiary-bg);
-  color: var(--bs-emphasis-color);
+  background-color: var(--ci-sidebar-hover-bg);
+  color: var(--ci-sidebar-strong);
+}
+
+.sidebar-nav .nav-link.nav-link:hover .bi {
+  color: var(--ci-sidebar-active-icon);
+}
+
+/* A top-level page, or a section whose page is open while collapsed. */
+.sidebar-nav .nav-link.nav-link.active,
+.sidebar-nav .nav-link.nav-sub.active {
+  background-color: var(--ci-sidebar-active-bg);
+  color: var(--ci-sidebar-active-text) !important;
+  font-weight: 600;
+}
+
+.sidebar-nav .nav-link.nav-link.active .bi {
+  color: var(--ci-sidebar-active-icon);
+}
+
+.sidebar-nav .nav-sublist {
+  border-inline-start: 1px solid var(--ci-sidebar-rail);
 }
 
 /* Sub-items: the filters under a section. */
@@ -188,55 +1280,63 @@ body {
   border-radius: var(--bs-border-radius-sm);
 }
 
-.sidebar-nav .nav-link.nav-sub.active {
-  /* A tint of the brand colour, not the brand colour. */
-  background-color: rgba(var(--bs-primary-rgb), 0.1);
-  color: var(--bs-primary) !important;
-  font-weight: 600;
-}
-
 .sidebar-nav .nav-link.nav-sub.active::before {
   content: '';
   position: absolute;
   /* Logical: the marker sits on the leading edge in both directions. */
   inset-inline-start: -0.55rem;
-  inset-block: 0.15rem;
+  inset-block: 0.2rem;
   inline-size: 2px;
   border-radius: 2px;
-  background-color: var(--bs-primary);
+  background-color: var(--ci-sidebar-active-icon);
 }
 
-/* A section header whose own page is open. */
-.sidebar-nav .nav-link.nav-section.active {
-  background-color: rgba(var(--bs-primary-rgb), 0.1);
-  color: var(--bs-primary) !important;
-  font-weight: 600;
+.sidebar-strong {
+  color: var(--ci-sidebar-strong);
+}
+
+.sidebar-muted {
+  font-size: 0.72rem;
+  color: var(--ci-sidebar-muted);
 }
 
 /* The count beside a filter. Muted until that filter is the current one —
    a row of loud badges competes with the item the user is actually on. */
 .sidebar-nav .nav-sub .badge {
   font-weight: 600;
-  font-size: 0.7rem;
-  min-inline-size: 1.35rem;
+  font-size: 0.68rem;
+  min-inline-size: 1.4rem;
 }
 
-.sidebar-nav .nav-link.nav-sub:not(.active) .badge.text-bg-secondary {
-  background-color: var(--bs-tertiary-bg) !important;
-  color: var(--bs-secondary-color) !important;
+.sidebar-nav .nav-link.nav-sub .badge.text-bg-secondary,
+.sidebar-nav .nav-link.nav-sub .badge.text-bg-primary,
+.sidebar-nav .nav-link.nav-sub .badge.text-bg-info,
+.sidebar-nav .nav-link.nav-sub .badge.text-bg-warning {
+  background-color: var(--ci-sidebar-badge-bg) !important;
+  color: var(--ci-sidebar-badge-text) !important;
+}
+
+.sidebar-nav .nav-link.nav-sub .badge.text-bg-danger {
+  background-color: var(--ci-sidebar-danger-bg) !important;
+  color: var(--ci-sidebar-danger-text) !important;
+}
+
+/* The sidebar's own scrollbar: hairline, and only as dark as its border. */
+.app-sidebar nav {
+  scrollbar-color: var(--ci-sidebar-rail) transparent;
 }
 
 /* ─── Buttons ────────────────────────────────────────────────────────────── */
 /*
- * Bootstrap's defaults are already close. Three small corrections: a slightly
- * firmer label so a button reads as an action rather than as text, a focus
- * ring that is visible without being a glow, and no movement on :active —
- * a button that shifts under the cursor feels unstable on a dense screen.
+ * A firmer label so a button reads as an action rather than as text, a focus
+ * ring that is visible without being a glow, and no movement on :active — a
+ * button that shifts under the cursor feels unstable on a dense screen.
  */
 
 .btn {
   font-weight: 500;
-  --bs-btn-focus-box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.25);
+  --bs-btn-border-radius: var(--bs-border-radius);
+  --bs-btn-focus-box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
 }
 
 .btn:focus-visible {
@@ -245,20 +1345,25 @@ body {
 }
 
 .btn-sm {
-  --bs-btn-padding-y: 0.28rem;
-  --bs-btn-padding-x: 0.6rem;
+  --bs-btn-padding-y: 0.32rem;
+  --bs-btn-padding-x: 0.7rem;
+  --bs-btn-border-radius: var(--bs-border-radius-sm);
 }
 
 /* A quiet outline button should read as quiet until it is hovered. */
 .btn-outline-secondary {
-  --bs-btn-color: var(--bs-secondary-color);
+  --bs-btn-color: var(--bs-body-color);
+  --bs-btn-bg: var(--bs-body-bg);
   --bs-btn-border-color: var(--bs-border-color);
-}
-
-.btn-outline-secondary:hover {
   --bs-btn-hover-bg: var(--bs-tertiary-bg);
-  --bs-btn-hover-border-color: var(--bs-secondary-border-subtle);
+  --bs-btn-hover-border-color: var(--bs-border-color);
   --bs-btn-hover-color: var(--bs-emphasis-color);
+  --bs-btn-active-bg: var(--bs-secondary-bg);
+  --bs-btn-active-border-color: var(--bs-border-color);
+  --bs-btn-active-color: var(--bs-emphasis-color);
+  --bs-btn-disabled-color: var(--bs-tertiary-color);
+  --bs-btn-disabled-bg: var(--bs-body-bg);
+  --bs-btn-disabled-border-color: var(--bs-border-color);
 }
 
 /* Icon-only buttons should be square, not the width of their padding. */
@@ -269,6 +1374,54 @@ body {
   inline-size: 2rem;
   block-size: 2rem;
   padding: 0;
+}
+
+/* ─── Forms ──────────────────────────────────────────────────────────────── */
+
+.form-control,
+.form-select {
+  border-color: var(--bs-border-color);
+  background-color: var(--bs-body-bg);
+}
+
+.form-control::placeholder {
+  color: var(--bs-tertiary-color);
+}
+
+.form-label {
+  color: var(--bs-emphasis-color);
+}
+
+.input-group-text {
+  background-color: var(--bs-tertiary-bg);
+  border-color: var(--bs-border-color);
+}
+
+/* ─── Modals, alerts, toasts ─────────────────────────────────────────────── */
+
+.modal-content {
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-xl);
+  box-shadow: var(--ci-shadow-lg);
+}
+
+.modal-header,
+.modal-footer {
+  border-color: var(--bs-border-color);
+  padding-inline: 1.25rem;
+}
+
+.modal-body {
+  padding: 1.25rem;
+}
+
+.alert {
+  border-radius: var(--bs-border-radius);
+}
+
+.toast {
+  border-radius: var(--bs-border-radius-lg);
+  box-shadow: var(--ci-shadow-lg);
 }
 
 /* ─── Timeline ───────────────────────────────────────────────────────────── */
@@ -289,13 +1442,13 @@ body {
 .timeline__item::before {
   content: '';
   position: absolute;
-  inset-inline-start: calc(-1.35rem - 5px);
+  inset-inline-start: calc(-1.35rem - 6px);
   inset-block-start: 0.35rem;
   width: 10px;
   height: 10px;
   border-radius: 50%;
   background: var(--bs-primary);
-  box-shadow: 0 0 0 3px var(--bs-body-bg);
+  box-shadow: 0 0 0 4px var(--bs-body-bg);
 }
 
 .timeline__item--muted::before {
@@ -332,9 +1485,9 @@ body {
 
 .wizard-steps li {
   flex: 1 1 140px;
-  padding: 0.5rem 0.75rem;
+  padding: 0.6rem 0.85rem;
   border-radius: var(--bs-border-radius);
-  background: var(--bs-tertiary-bg);
+  background: var(--bs-secondary-bg);
   font-size: 0.85rem;
   color: var(--bs-secondary-color);
   /* The leading edge again, so the active marker is on the correct side. */
@@ -344,27 +1497,29 @@ body {
 .wizard-steps li.active {
   background: var(--bs-body-bg);
   border-inline-start-color: var(--bs-primary);
-  color: var(--bs-body-color);
+  color: var(--bs-emphasis-color);
   font-weight: 600;
+  box-shadow: var(--ci-shadow-sm);
 }
 
 .wizard-steps li.done {
-  color: var(--bs-success);
+  color: var(--bs-success-text-emphasis);
 }
 
 .dropzone {
   border: 2px dashed var(--bs-border-color);
-  border-radius: var(--bs-border-radius);
+  border-radius: var(--bs-border-radius-lg);
   padding: 2.25rem 1rem;
   text-align: center;
   cursor: pointer;
+  background: var(--bs-body-bg);
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .dropzone:hover,
 .dropzone.dragging {
   border-color: var(--bs-primary);
-  background: var(--bs-tertiary-bg);
+  background: var(--bs-primary-bg-subtle);
 }
 
 /* A cell the import validator flagged. Coloured AND marked with a border, so
@@ -404,7 +1559,7 @@ body {
   width: 100%;
   height: 520px;
   background: var(--bs-tertiary-bg);
-  border-radius: var(--bs-border-radius);
+  border-radius: var(--bs-border-radius-lg);
   overflow: hidden;
 }
 
@@ -412,6 +1567,98 @@ body {
   position: absolute;
   transform: translate(-50%, -100%);
   cursor: pointer;
+}
+
+/* ─── Sign-in ────────────────────────────────────────────────────────────── */
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr;
+  background-color: var(--ci-page-bg);
+}
+
+@media (min-width: 992px) {
+  .auth-page {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  }
+}
+
+.auth-hero {
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  padding: 3rem;
+  background:
+    radial-gradient(1200px 600px at 110% -10%, rgba(124, 92, 255, 0.55), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(56, 189, 248, 0.35), transparent 60%),
+    linear-gradient(160deg, #10204f 0%, #142a6b 45%, #0b1430 100%);
+}
+
+.auth-hero::after {
+  /* A faint grid, like survey paper. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 85%);
+  pointer-events: none;
+}
+
+.auth-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.auth-hero h2 {
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.3;
+  max-inline-size: 28rem;
+}
+
+.auth-hero p {
+  color: rgba(255, 255, 255, 0.75);
+  max-inline-size: 30rem;
+}
+
+.auth-feature {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.auth-feature .bi {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 34px;
+  block-size: 34px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  flex-shrink: 0;
+}
+
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-card .form-control {
+  padding-block: 0.6rem;
 }
 
 /* ─── Inquiry sheet (the paper form, on screen and on A4) ─────────────────

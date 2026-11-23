@@ -17,6 +17,7 @@ import { SubmissionsService } from './submissions.service';
 import {
   ChooseFormDto,
   CreateDraftDto,
+  OfficeSubmitDto,
   CreateFormTemplateDto,
   SaveFormVersionDto,
   SaveSubmissionDto,
@@ -227,6 +228,21 @@ export class FormsController {
     @Body() dto: ChooseFormDto,
   ) {
     return this.submissions.chooseForm(tenantId, investigationId, principal, dto);
+  }
+
+  @Post('investigation/:investigationId/office/submit')
+  @RequirePermission(P.INVESTIGATIONS_EDIT)
+  @ApiOperation({
+    summary:
+      'The office hands in the paper form; the case goes to QC (no GPS check expected)',
+  })
+  submitOffice(
+    @TenantId() tenantId: string,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+    @Param('investigationId', ParseUUIDPipe) investigationId: string,
+    @Body() dto: OfficeSubmitDto,
+  ) {
+    return this.submissions.submitOffice(tenantId, investigationId, principal, dto);
   }
 
   @Patch('investigation/:investigationId/office')

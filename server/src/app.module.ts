@@ -29,6 +29,7 @@ import { ImportsModule } from './imports/imports.module';
 import { FormsModule } from './forms/forms.module';
 import { QcModule } from './qc/qc.module';
 import { MediaModule } from './media/media.module';
+import { ProfileModule } from './profile/profile.module';
 import { GpsModule } from './gps/gps.module';
 import { ReportsModule } from './reports/reports.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -129,6 +130,7 @@ import { env, isProduction } from './common/config/env';
     FormsModule,
     QcModule,
     MediaModule,
+    ProfileModule,
     GpsModule,
     ReportsModule,
     AnalyticsModule,

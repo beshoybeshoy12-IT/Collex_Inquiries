@@ -10,6 +10,7 @@ import EmptyState from '../../components/EmptyState';
 import ErrorState from '../../components/ErrorState';
 import { Panel } from '../../components/PageHeader';
 import { useToast } from '../../components/Toast';
+import Modal from '../../components/Modal';
 import InquirySheet from '../forms/InquirySheet';
 import { sheetHeader } from '../forms/sheetHeader';
 
@@ -97,6 +98,53 @@ export default function CaseAnswers({ investigationId, investigation }) {
     },
     onError: (mutationError) =>
       toast.error(localiseServerMessage(mutationError.friendlyMessage)),
+  });
+
+  // ── Hand the paper form in: the case goes to QC ─────────────────────────
+  const [handingIn, setHandingIn] = useState(false);
+  const [outcome, setOutcome] = useState('');
+
+  const handIn = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post(`/forms/investigation/${investigationId}/office/submit`, {
+          // While editing, send what is on screen (saved or not); otherwise the
+          // server hands in the draft it already holds.
+          ...(editing ? { answers: draft } : {}),
+          ...(outcome ? { result: outcome } : {}),
+        })
+      ).data,
+    onSuccess: () => {
+      toast.success(t('inquirySheet.handedIn'));
+      setHandingIn(false);
+      setOutcome('');
+      setEditing(false);
+      setDirty(false);
+      setWarnings([]);
+      for (const key of [
+        ['case-form', investigationId],
+        ['investigation', investigationId],
+        ['investigation-timeline', investigationId],
+        ['investigation-counts'],
+      ]) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
+    onError: (mutationError) => {
+      setHandingIn(false);
+      // An incomplete form comes back with the list of what is missing.
+      const problems = mutationError.details?.problems;
+      if (Array.isArray(problems) && problems.length) {
+        // Open the sheet on what was handed in, so the gaps can be filled.
+        if (!editing) {
+          setDraft({ ...(data?.submission?.answers ?? {}) });
+          setDirty(false);
+          setEditing(true);
+        }
+        setWarnings(problems);
+      }
+      toast.error(localiseServerMessage(mutationError.friendlyMessage));
+    },
   });
 
   // Every published form the tenant has — one blank-print button each, and
@@ -260,13 +308,35 @@ export default function CaseAnswers({ investigationId, investigation }) {
           {dirty && (
             <span className="small text-warning-emphasis">{t('common.unsavedChanges')}</span>
           )}
+          <button
+            type="button"
+            className="btn btn-sm btn-success"
+            onClick={() => setHandingIn(true)}
+            disabled={save.isPending || handIn.isPending}
+          >
+            <i className="bi bi-send-check me-1" aria-hidden="true" />
+            {t('inquirySheet.handIn')}
+          </button>
         </>
       ) : (
         canEnter && (
-          <button type="button" className="btn btn-sm btn-primary" onClick={startEditing}>
-            <i className="bi bi-pencil-square me-1" aria-hidden="true" />
-            {submission ? t('inquirySheet.edit') : t('inquirySheet.enter')}
-          </button>
+          <>
+            <button type="button" className="btn btn-sm btn-primary" onClick={startEditing}>
+              <i className="bi bi-pencil-square me-1" aria-hidden="true" />
+              {submission ? t('inquirySheet.edit') : t('inquirySheet.enter')}
+            </button>
+            {submission?.status === 'DRAFT' && (
+              <button
+                type="button"
+                className="btn btn-sm btn-success"
+                onClick={() => setHandingIn(true)}
+                disabled={handIn.isPending}
+              >
+                <i className="bi bi-send-check me-1" aria-hidden="true" />
+                {t('inquirySheet.handIn')}
+              </button>
+            )}
+          </>
         )
       )}
 
@@ -296,6 +366,56 @@ export default function CaseAnswers({ investigationId, investigation }) {
         )}
       </span>
     </div>
+
+    <Modal
+      open={handingIn}
+      onClose={() => setHandingIn(false)}
+      title={t('inquirySheet.handIn')}
+      busy={handIn.isPending}
+      footer={
+        <>
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            onClick={() => setHandingIn(false)}
+            disabled={handIn.isPending}
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn-success"
+            onClick={() => handIn.mutate()}
+            disabled={handIn.isPending}
+          >
+            {handIn.isPending && (
+              <span className="spinner-border spinner-border-sm me-2" aria-hidden="true" />
+            )}
+            {t('inquirySheet.handInConfirm')}
+          </button>
+        </>
+      }
+    >
+      <p className="mb-3">{t('inquirySheet.handInHint')}</p>
+      <label className="form-label small fw-semibold" htmlFor="handInOutcome">
+        {t('inquirySheet.outcome')}
+      </label>
+      <select
+        id="handInOutcome"
+        className="form-select"
+        value={outcome}
+        onChange={(event) => setOutcome(event.target.value)}
+      >
+        <option value="">{t('inquirySheet.outcomeNone')}</option>
+        {['POSITIVE', 'NEGATIVE', 'PARTIAL', 'NOT_FOUND', 'REFUSED', 'UNREACHABLE'].map(
+          (value) => (
+            <option key={value} value={value}>
+              {t(`result.${value}`)}
+            </option>
+          ),
+        )}
+      </select>
+    </Modal>
     </>
   );
 

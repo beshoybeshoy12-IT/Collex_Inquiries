@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../app/AuthContext';
 import { setLanguage, LANGUAGES } from '../../i18n';
 import { localiseServerMessage } from '../../services/api';
-import Logo from '../../components/Logo';
+import Logo, { Wordmark } from '../../components/Logo';
+import ThemeToggle from '../../components/ThemeToggle';
 
 const schema = z.object({
   email: z.string().email(),
@@ -66,24 +67,64 @@ export default function Login() {
   const otherLanguage = i18n.language === 'ar' ? 'en' : 'ar';
 
   return (
-    <div className="min-vh-100 d-flex align-items-center justify-content-center bg-body-tertiary p-3">
-      <div className="w-100" style={{ maxWidth: 420 }}>
-        <div className="text-center mb-4">
-          <span
-            className="d-inline-flex align-items-center justify-content-center rounded-3 text-bg-primary mb-2"
-            style={{ width: 48, height: 48 }}
-            aria-hidden="true"
-          >
-            <Logo size={30} />
-          </span>
-          <h1 className="h4 mb-1">{t('app.name')}</h1>
-          <p className="text-body-secondary small mb-0">{t('app.tagline')}</p>
+    <div className="auth-page">
+      {/* The brand side. Hidden on phones, where the form is the whole job. */}
+      <section className="auth-hero d-none d-lg-flex flex-column justify-content-between">
+        {/* White on the blue hero: the artwork is single-colour, so contrast
+            is set here rather than by a second asset. */}
+        <div className="d-flex align-items-center gap-3 text-white">
+          <Logo size={44} />
+          <Wordmark height={22} title={t('app.name')} />
         </div>
 
-        <div className="card shadow-sm">
+        <div>
+          <h2 className="mb-3">{t('auth.heroTitle')}</h2>
+          <p className="mb-4">{t('auth.heroText')}</p>
+          <div className="d-flex flex-column gap-3">
+            {[
+              ['geo-alt', 'auth.heroPoint1'],
+              ['ui-checks', 'auth.heroPoint2'],
+              ['shield-check', 'auth.heroPoint3'],
+            ].map(([icon, key]) => (
+              <div className="auth-feature" key={key}>
+                <i className={`bi bi-${icon}`} aria-hidden="true" />
+                <span className="pt-1">{t(key)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="small" style={{ color: 'rgba(255,255,255,.5)' }}>
+          © {new Date().getFullYear()} {t('app.name')}
+        </div>
+      </section>
+
+      <section className="auth-panel position-relative">
+        <div className="position-absolute top-0 p-3" style={{ insetInlineEnd: 0 }}>
+          <div className="header-tools">
+            <button
+              type="button"
+              className="header-icon px-2"
+              onClick={() => setLanguage(otherLanguage)}
+            >
+              <i className="bi bi-translate me-1" aria-hidden="true" />
+              <span className="small fw-semibold">{LANGUAGES[otherLanguage].name}</span>
+            </button>
+            <ThemeToggle />
+          </div>
+        </div>
+
+      <div className="auth-card">
+        <div className="mb-4">
+          <span className="brand-mark mb-3 d-lg-none" aria-hidden="true">
+            <Logo size={34} />
+          </span>
+          <h1 className="h3 fw-bold mb-1">{t('auth.welcome')}</h1>
+          <p className="text-body-secondary mb-0">{t('auth.welcomeHint')}</p>
+        </div>
+
+        <div className="card">
           <div className="card-body p-4">
-            <h2 className="h6 mb-1">{t('auth.welcome')}</h2>
-            <p className="text-body-secondary small mb-3">{t('auth.welcomeHint')}</p>
 
             {error && (
               <div className="alert alert-danger py-2 px-3 small" role="alert">
@@ -176,16 +217,9 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="text-center mt-3">
-          <button
-            type="button"
-            className="btn btn-sm btn-link text-decoration-none"
-            onClick={() => setLanguage(otherLanguage)}
-          >
-            {LANGUAGES[otherLanguage].name}
-          </button>
-        </div>
+        <p className="text-center text-body-tertiary small mt-4 mb-0">{t('app.tagline')}</p>
       </div>
+      </section>
     </div>
   );
 }

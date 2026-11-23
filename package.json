@@ -2,7 +2,7 @@
   "name": "collex-inquiries",
   "version": "1.0.0",
   "private": true,
-  "description": "Collex Inquiries — Field Investigation / Field Verification Management System (Web Platform)",
+  "description": "Collex Inquiries — Field Investigation / Field Verification Management System (web platform + field mobile app)",
   "scripts": {
     "start": "docker compose up --build -d",
     "stop": "docker compose down",
@@ -11,14 +11,15 @@
     "client": "cd client && npm run dev",
     "server": "cd server && npm run start:dev",
     "worker": "cd server && npm run worker:dev",
-    "install-all": "npm install && cd client && npm install && cd ../server && npm install",
+    "install-all": "npm install && cd client && npm install && cd ../server && npm install && cd ../mobile && npm install",
     "db:migrate": "cd server && prisma migrate dev",
     "db:deploy": "cd server && npm run db:deploy",
     "db:push": "cd server && npm run db:push",
     "db:seed": "cd server && npm run db:seed",
     "db:studio": "cd server && prisma studio",
     "test": "cd server && npm test",
-    "lint": "cd server && npm run lint && cd ../client && npm run lint"
+    "lint": "cd server && npm run lint && cd ../client && npm run lint && cd ../mobile && npm run lint",
+    "mobile": "cd mobile && npx expo start"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

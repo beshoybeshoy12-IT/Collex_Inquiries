@@ -123,3 +123,21 @@ export class ChooseFormDto {
   @IsBoolean()
   discardDraft?: boolean;
 }
+
+export class OfficeSubmitDto {
+  @ApiPropertyOptional({
+    description:
+      'Answers keyed by field key. Omit to hand in the draft already saved.',
+  })
+  @IsOptional()
+  @IsObject()
+  answers?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    enum: InvestigationResult,
+    description: 'The outcome the investigator wrote on the paper form.',
+  })
+  @IsOptional()
+  @IsEnum(InvestigationResult)
+  result?: InvestigationResult;
+}

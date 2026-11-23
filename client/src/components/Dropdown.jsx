@@ -11,7 +11,15 @@ import { useEffect, useRef, useState } from 'react';
  * RTL build flips for us, so the menu opens inward in both directions rather
  * than off the side of the viewport.
  */
-export default function Dropdown({ label, icon, children, align = 'end', className = '' }) {
+export default function Dropdown({
+  label,
+  icon,
+  children,
+  align = 'end',
+  className = '',
+  buttonClassName = 'btn btn-sm btn-outline-secondary dropdown-toggle',
+  ariaLabel,
+}) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -36,8 +44,9 @@ export default function Dropdown({ label, icon, children, align = 'end', classNa
   return (
     <div className={`dropdown ${className}`} ref={containerRef}>
       <button
-        className="btn btn-sm btn-outline-secondary dropdown-toggle"
+        className={buttonClassName}
         type="button"
+        aria-label={ariaLabel}
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -50,7 +59,12 @@ export default function Dropdown({ label, icon, children, align = 'end', classNa
         <ul
           className={`dropdown-menu dropdown-menu-${align} show`}
           role="menu"
-          style={{ position: 'absolute', insetInlineEnd: align === 'end' ? 0 : undefined }}
+          style={{
+            position: 'absolute',
+            insetInlineEnd: align === 'end' ? 0 : undefined,
+            marginTop: '0.4rem',
+            minWidth: '12rem',
+          }}
           onClick={() => setOpen(false)}
         >
           {children}

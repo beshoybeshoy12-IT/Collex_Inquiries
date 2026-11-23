@@ -255,4 +255,71 @@ describe('SubmissionsService', () => {
       await expect(choose()).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+
+  describe('submitOffice', () => {
+    it('refuses an incomplete form and says what is missing', async () => {
+      // RESIDENCE_FORM_SCHEMA has no required fields, so use a bad option.
+      await expect(
+        service.submitOffice(tenantId, caseId, webUser, {
+          answers: { propertyType: 'CASTLE' },
+        }),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ errorCode: 'FORM_INCOMPLETE' }) });
+      expect(investigations.transition).not.toHaveBeenCalled();
+    });
+
+    it('records the submission and sends the case to QC through the form path', async () => {
+      await service.submitOffice(tenantId, caseId, webUser, {
+        answers: { propertyType: 'HOUSE' },
+        result: 'POSITIVE' as never,
+      });
+
+      expect(prisma.formSubmission.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          status: SubmissionStatus.SUBMITTED,
+          submittedByType: PrincipalType.WEB_USER,
+          answers: { propertyType: 'HOUSE' },
+        }),
+      });
+      expect(investigations.transition).toHaveBeenNthCalledWith(
+        1,
+        tenantId,
+        caseId,
+        webUser,
+        expect.objectContaining({ status: InvestigationStatus.SUBMITTED, result: 'POSITIVE' }),
+        { viaForm: true },
+      );
+      expect(investigations.transition).toHaveBeenNthCalledWith(
+        2,
+        tenantId,
+        caseId,
+        webUser,
+        expect.objectContaining({ status: InvestigationStatus.QC_PENDING }),
+      );
+      expect(investigations.systemTransition).not.toHaveBeenCalled();
+    });
+
+    it('does not expect a GPS check-in for a paper visit', async () => {
+      prisma.investigation.findFirstOrThrow.mockResolvedValue({
+        targetLat: 30,
+        targetLng: 31,
+        investigationType: { requiredPhotoCategories: [] },
+      });
+
+      const result = await service.submitOffice(tenantId, caseId, webUser, { answers: {} });
+
+      expect(prisma.gpsEvent.findFirst).not.toHaveBeenCalled();
+      expect(result.autoValidation.passed).toBe(true);
+    });
+
+    it('is closed once the case is under review', async () => {
+      investigations.assertVisible.mockResolvedValue({
+        id: caseId,
+        caseNumber: 'CASE-1',
+        status: InvestigationStatus.QC_PENDING,
+      });
+      await expect(
+        service.submitOffice(tenantId, caseId, webUser, { answers: {} }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
 });

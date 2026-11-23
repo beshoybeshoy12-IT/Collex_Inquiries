@@ -67,14 +67,14 @@ export default function NotificationBell() {
     <div className="position-relative" ref={containerRef}>
       <button
         type="button"
-        className="btn btn-sm btn-outline-secondary position-relative"
+        className="header-icon position-relative"
         onClick={() => setOpen((current) => !current)}
         aria-label={t('notifications.title')}
         aria-expanded={open}
       >
         <i className="bi bi-bell" aria-hidden="true" />
         {count > 0 && (
-          <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill text-bg-danger">
+          <span className="badge rounded-pill bg-danger text-white">
             {count > 99 ? '99+' : count}
             <span className="visually-hidden">{t('notifications.unread', { count })}</span>
           </span>

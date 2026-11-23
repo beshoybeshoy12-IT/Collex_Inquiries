@@ -11,25 +11,33 @@ say. The agency dispatches an investigator, who visits, photographs, fills in a 
 and submits; a QC reviewer approves or returns it; a PDF report goes back to the
 client.
 
-Three independent npm packages, **no workspaces** — each has its own `package.json`
+Four independent npm packages, **no workspaces** — each has its own `package.json`
 and lockfile and installs separately:
 
 - `client/` — React 19 + Vite 6, Bootstrap 5, TanStack Query, i18next. **JavaScript
   and JSX only.**
 - `server/` — NestJS 11 + Prisma 6 + PostgreSQL 16, BullMQ, Socket.IO, Puppeteer
+- `mobile/` — the investigator's field app: Expo SDK 58 (React Native 0.88), Expo
+  Router, TanStack Query, i18next. **JavaScript and JSX only**, same as `client/`.
 - root — orchestration scripts only
 
 ## Hard constraints
 
 These come from the brief and are not open for tidying:
 
-1. **The mobile app is not built.** The API it will use is, and it is real and tested.
-   **There is no `/mobile` route prefix** — an investigator calls the same routes a
-   coordinator does, gated by `@AllowPrincipals` and narrowed by the service. The one
-   investigator-specific route is `POST /api/v1/auth/investigator/login`. Do not
-   create fake integrations or write anything implying a mobile app exists.
-2. **No TypeScript in `client/`.** No `.ts`, no `.tsx`, no `tsconfig.json`. If a
-   client file would benefit from types, use JSDoc.
+1. **The mobile app (`mobile/`) uses the same API as everyone else.** **There is no
+   `/mobile` route prefix** — an investigator calls the same routes a coordinator
+   does, gated by `@AllowPrincipals` and narrowed by the service. The one
+   investigator-specific route is `POST /api/v1/auth/investigator/login`. New field
+   features are server routes first (tested), then app screens; the app never decides
+   on its own what a case may do next — it renders `allowedTransitions`.
+   **The phone is never required to close a case.** The office can hand a paper form
+   in (`POST /forms/investigation/:id/office/submit`) and take the case through QC
+   and completion from the web.
+2. **No TypeScript in `client/` or `mobile/`.** No `.ts`, no `.tsx`, no
+   `tsconfig.json`. If a file would benefit from types, use JSDoc. (`mobile/` has the
+   `typescript` package as a dev dependency only because Expo's ESLint config loads
+   its parser.)
 3. **Never trust a client-supplied `tenantId`.** It is ignored and logged as an
    injection attempt. The tenant comes from the authenticated principal.
 4. **Permissions are enforced server-side.** Frontend checks hide buttons; they are
@@ -47,7 +55,7 @@ These come from the brief and are not open for tidying:
 ## Commands
 
 ```bash
-npm run install-all      # root + client + server; run before anything
+npm run install-all      # root + client + server + mobile; run before anything
 npm run start:local      # client 5174 + api 5100 + worker
 npm start / npm stop     # the Docker stack (nginx on 8080)
 npm test                 # server jest suite
@@ -60,6 +68,16 @@ residence/work inquiry forms from `prisma/seed-data/forms.ts` into existing tena
 new version; idempotent).
 
 Client (`cd client`): `npm run dev`, `npm run build`, `npm run lint`.
+
+Mobile (`cd mobile`): `npx expo start` (scan the QR with a development build, or
+Expo Go for everything except push), `npm run web` (browser preview on 8081),
+`npm run lint`, `npm run export:web` (full Metro bundle — the fastest "does it
+compile" check). Add packages with `npx expo install <pkg>`, never plain `npm
+install`, so versions match the SDK. Set `EXPO_PUBLIC_API_URL` in `mobile/.env`
+(see `.env.example`); a phone needs the computer's LAN address, not `localhost`. The
+browser preview also needs `http://localhost:8081` in the server's `CORS_ORIGINS`;
+the native app is not subject to CORS. Read `mobile/AGENTS.md` before touching Expo
+APIs — they change every SDK.
 
 ### Command gotchas
 
@@ -252,6 +270,13 @@ administrator. Frontend gates remain conveniences; the controller is the control
   case. `client/src/modules/forms/InquirySheet.jsx` draws any schema as the paper sheet
   (edit / read / blank) and `/print/...` routes print it; print CSS is tuned so both
   seeded forms fit one A4 page — re-measure if you add fields.
+- **Who may submit** — `TransitionRule.formOnly` marks actors who may make a move
+  only by submitting the form (`assertTransition(..., { viaForm: true })`), never
+  from the status bar; `allowedNextStatuses` leaves those moves out. The office uses
+  it to hand in a paper form from ASSIGNED…IN_PROGRESS/REWORK straight to SUBMITTED,
+  then QC_PENDING (no GPS check expected for paper; the other automatic checks are
+  recorded for QC but do not bounce the case). The investigator's own path is
+  unchanged: IN_PROGRESS → SUBMITTED from the app, with the automatic checks.
 - **Choosing a case's form** — a case defaults to its type's form, but the office can
   put it on any published form (`PUT /forms/investigation/:id/form`) until the first
   submission; it is stored as the case's `formVersionId`. Assignment therefore pins

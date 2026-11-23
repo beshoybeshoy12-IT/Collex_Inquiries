@@ -7,6 +7,7 @@ import { localisedName } from '../../i18n';
 import PageHeader, { Panel } from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import EmptyState from '../../components/EmptyState';
+import useChartTheme from '../../hooks/useChartTheme';
 
 /**
  * QC quality statistics.
@@ -18,6 +19,7 @@ import EmptyState from '../../components/EmptyState';
 export default function QcStatistics() {
   const { t, i18n } = useTranslation();
   const [days, setDays] = useState(30);
+  const chart = useChartTheme();
 
   const range = useMemo(() => {
     const to = new Date();
@@ -94,6 +96,7 @@ export default function QcStatistics() {
               ) : (
                 <div style={{ height: 240 }}>
                   <Doughnut
+                    key={chart.theme}
                     options={{
                       responsive: true,
                       maintainAspectRatio: false,
@@ -108,7 +111,7 @@ export default function QcStatistics() {
                       datasets: [
                         {
                           data: [data.approved, data.rejected, data.rework],
-                          backgroundColor: ['#16a34a', '#dc2626', '#f59e0b'],
+                          backgroundColor: [chart.series[1], chart.series[2], chart.series[3]],
                           borderWidth: 0,
                         },
                       ],

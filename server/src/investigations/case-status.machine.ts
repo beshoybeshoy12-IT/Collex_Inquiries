@@ -42,6 +42,13 @@ export interface TransitionRule {
   stamps?: keyof CaseTimestamps;
   /** Requires a free-text reason, recorded on the history row. */
   requiresReason?: boolean;
+  /**
+   * Actors who may make this move ONLY by submitting the case's form — never
+   * from the generic status bar. Used for the office handing in a paper form:
+   * "submitted" has to mean "there are answers", so a coordinator cannot mark
+   * a case submitted with nothing behind it.
+   */
+  formOnly?: TransitionActor[];
   description: string;
 }
 
@@ -171,10 +178,26 @@ export const TRANSITIONS: TransitionRule[] = [
   {
     from: S.IN_PROGRESS,
     to: S.SUBMITTED,
-    actors: [FIELD],
+    actors: [FIELD, WEB],
+    formOnly: [WEB],
     stamps: 'submittedAt',
-    description: 'Investigator submitted the completed form.',
+    description:
+      'Investigator submitted the completed form, or the office handed in the paper form.',
   },
+  // The office hands in a paper form from wherever the field work stands.
+  // The investigator walked the doorstep on paper, so the app never recorded
+  // ACCEPTED → ON_SITE → IN_PROGRESS; insisting on those stamps would leave
+  // every paper case stuck. Form-only: the move comes with the answers.
+  ...[S.ASSIGNED, S.ACCEPTED, S.EN_ROUTE, S.ON_SITE, S.REWORK].map(
+    (from): TransitionRule => ({
+      from,
+      to: S.SUBMITTED,
+      actors: [WEB],
+      formOnly: [WEB],
+      stamps: 'submittedAt',
+      description: 'Office handed in the paper form for the investigator.',
+    }),
+  ),
   {
     from: S.IN_PROGRESS,
     to: S.ACCEPTED,
@@ -349,13 +372,20 @@ export function findTransition(
   return INDEX.get(`${from}->${to}`);
 }
 
-/** Every status reachable from `from` by `actor`. Drives the UI's action bar. */
+/**
+ * Every status reachable from `from` by `actor` through the generic action
+ * bar. Form-only moves are left out — they are offered by the form screen,
+ * which has the answers they require.
+ */
 export function allowedNextStatuses(
   from: InvestigationStatus,
   actor: TransitionActor,
 ): InvestigationStatus[] {
   return ALL_TRANSITIONS.filter(
-    (rule) => rule.from === from && rule.actors.includes(actor),
+    (rule) =>
+      rule.from === from &&
+      rule.actors.includes(actor) &&
+      !rule.formOnly?.includes(actor),
   ).map((rule) => rule.to);
 }
 
@@ -386,6 +416,7 @@ export function assertTransition(
   to: InvestigationStatus,
   actor: TransitionActor,
   reason?: string,
+  options: { viaForm?: boolean } = {},
 ): TransitionRule {
   const rule = findTransition(from, to);
 
@@ -405,6 +436,15 @@ export function assertTransition(
       `هذا الإجراء غير متاح لهذا النوع من المستخدمين - ` +
         `A ${actor === 'SYSTEM' ? 'system' : actor.toLowerCase().replace('_', ' ')} ` +
         `cannot move a case from ${from} to ${to}`,
+    );
+  }
+
+  if (rule.formOnly?.includes(actor) && !options.viaForm) {
+    throw new IllegalTransitionError(
+      from,
+      to,
+      'التسليم يتم من خلال الاستمارة فقط - ' +
+        'This move is made by submitting the form, not from the status bar',
     );
   }
 

@@ -22,6 +22,7 @@ import {
 } from './form-schema';
 import {
   ChooseFormDto,
+  OfficeSubmitDto,
   SaveSubmissionDto,
   SubmitFormDto,
 } from './dto/form.dto';
@@ -426,56 +427,15 @@ export class SubmissionsService {
       dto.answers,
     );
 
-    const lastAttempt = await this.prisma.formSubmission.aggregate({
-      where: { tenantId, investigationId },
-      _max: { attempt: true },
-    });
-
-    const submission = await this.prisma.$transaction(async (tx) => {
-      // The open draft, if any, IS this attempt — it was opened for it, by the
-      // handset or by the office typing in the paper form. It becomes the
-      // submission. Creating a fresh row under the same attempt number would
-      // collide with the draft on the (investigationId, attempt) unique key;
-      // with no draft, this is the next attempt after the last one.
-      const draft = await tx.formSubmission.findFirst({
-        where: { tenantId, investigationId, status: SubmissionStatus.DRAFT },
-        orderBy: { attempt: 'desc' },
-        select: { id: true },
-      });
-
-      // Everything else becomes history.
-      await tx.formSubmission.updateMany({
-        where: {
-          tenantId,
-          investigationId,
-          status: { not: SubmissionStatus.SUPERSEDED },
-          ...(draft ? { id: { not: draft.id } } : {}),
-        },
-        data: { status: SubmissionStatus.SUPERSEDED },
-      });
-
-      const submitted = {
-        formVersionId: form.versionId,
-        status: SubmissionStatus.SUBMITTED,
-        answers: dto.answers as never,
-        autoValidation: autoValidation as never,
-        submittedByType: principal.principalType,
-        submittedById: principal.id,
-        submittedAt: new Date(),
-        clientSubmissionId: dto.clientSubmissionId,
-      };
-
-      return draft
-        ? tx.formSubmission.update({ where: { id: draft.id }, data: submitted })
-        : tx.formSubmission.create({
-            data: {
-              ...submitted,
-              tenantId,
-              investigationId,
-              attempt: (lastAttempt._max.attempt ?? 0) + 1,
-            },
-          });
-    });
+    const submission = await this.recordSubmission(
+      tenantId,
+      investigationId,
+      form.versionId,
+      dto.answers,
+      autoValidation,
+      principal,
+      dto.clientSubmissionId,
+    );
 
     // The case moves through the machine, never by direct assignment. The
     // investigator makes the first move; the remaining two have no human
@@ -530,6 +490,199 @@ export class SubmissionsService {
     return { submission, duplicate: false, autoValidation };
   }
 
+  /**
+   * The office hands in the paper form on the investigator's behalf.
+   *
+   * The same answer validation as the handset — a required field left empty
+   * is refused with the list of what is missing — and the same submission
+   * row, marked as submitted by a web user so the timeline and the audit say
+   * who actually typed it.
+   *
+   * WHAT DIFFERS FROM THE HANDSET PATH, ON PURPOSE:
+   *
+   *  - No GPS check-in is expected. A paper visit records none, so the check
+   *    could only ever fail.
+   *  - The remaining automatic checks (attachments exist, required photo
+   *    categories) still run and are stored on the submission for QC to read,
+   *    but they do not bounce the case to REWORK: the office is the one that
+   *    would receive it, and it is already looking at the case. The case goes
+   *    to QC_PENDING through the existing "sent to QC without the automatic
+   *    check" rule, and QC decides.
+   *
+   * `investigations.edit` gates it; QC does not hold that permission, so the
+   * person who types the paper in cannot be the one who approves it.
+   */
+  async submitOffice(
+    tenantId: string,
+    investigationId: string,
+    principal: AuthenticatedPrincipal,
+    dto: OfficeSubmitDto,
+  ) {
+    const investigation = await this.investigations.assertVisible(
+      tenantId,
+      investigationId,
+      principal,
+    );
+
+    if (!OFFICE_ENTRY_STATUSES.includes(investigation.status)) {
+      throw new BadRequestException({
+        message:
+          'لا يمكن تسليم الاستمارة في هذه المرحلة - ' +
+          'The form cannot be handed in at this stage',
+        errorCode: 'FORM_ENTRY_NOT_OPEN',
+        status: investigation.status,
+      });
+    }
+
+    const form = await this.forms.schemaForInvestigation(
+      tenantId,
+      investigationId,
+    );
+
+    // The answers sent with the request, or the draft already saved.
+    let answers: Record<string, unknown>;
+    if (dto.answers) {
+      const known = new Set(
+        form.schema.sections.flatMap((s) => s.fields.map((f) => f.key)),
+      );
+      answers = Object.fromEntries(
+        Object.entries(dto.answers).filter(([key]) => known.has(key)),
+      );
+    } else {
+      const draft = await this.prisma.formSubmission.findFirst({
+        where: { tenantId, investigationId, status: SubmissionStatus.DRAFT },
+        orderBy: { attempt: 'desc' },
+        select: { answers: true },
+      });
+      answers = (draft?.answers ?? {}) as Record<string, unknown>;
+    }
+
+    const answerCheck = validateAnswers(form.schema, answers);
+    if (!answerCheck.valid) {
+      throw new BadRequestException({
+        message: 'النموذج غير مكتمل - The form is incomplete',
+        errorCode: 'FORM_INCOMPLETE',
+        problems: answerCheck.problems,
+      });
+    }
+
+    const autoValidation = await this.runAutomaticChecks(
+      tenantId,
+      investigationId,
+      form.schema,
+      answers,
+      { expectGps: false },
+    );
+
+    const submission = await this.recordSubmission(
+      tenantId,
+      investigationId,
+      form.versionId,
+      answers,
+      { ...autoValidation, mode: 'PAPER_FORM' },
+      principal,
+    );
+
+    await this.investigations.transition(
+      tenantId,
+      investigationId,
+      principal,
+      {
+        status: InvestigationStatus.SUBMITTED,
+        result: dto.result,
+        reason: 'Paper form handed in by the office',
+      },
+      { viaForm: true },
+    );
+
+    await this.investigations.transition(tenantId, investigationId, principal, {
+      status: InvestigationStatus.QC_PENDING,
+      reason: 'Paper form — sent to QC',
+    });
+
+    await this.audit.log({
+      tenantId,
+      action: 'CASE_SUBMITTED_BY_OFFICE',
+      category: 'INVESTIGATION',
+      actorType: principal.principalType,
+      actorId: principal.id,
+      actorName: principal.fullName,
+      entityType: 'Investigation',
+      entityId: investigationId,
+      entityLabel: investigation.caseNumber,
+      metadata: {
+        attempt: submission.attempt,
+        checksPassed: autoValidation.passed,
+      },
+    });
+
+    return { submission, autoValidation };
+  }
+
+  /**
+   * Turn the open draft into the submission, or open the next attempt.
+   *
+   * The open draft, if any, IS this attempt — it was opened for it, by the
+   * handset or by the office typing in the paper form. Creating a fresh row
+   * under the same attempt number would collide with the draft on the
+   * (investigationId, attempt) unique key; with no draft, this is the next
+   * attempt after the last one. Everything else becomes history.
+   */
+  private async recordSubmission(
+    tenantId: string,
+    investigationId: string,
+    formVersionId: string,
+    answers: Record<string, unknown>,
+    autoValidation: unknown,
+    principal: AuthenticatedPrincipal,
+    clientSubmissionId?: string,
+  ) {
+    const lastAttempt = await this.prisma.formSubmission.aggregate({
+      where: { tenantId, investigationId },
+      _max: { attempt: true },
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      const draft = await tx.formSubmission.findFirst({
+        where: { tenantId, investigationId, status: SubmissionStatus.DRAFT },
+        orderBy: { attempt: 'desc' },
+        select: { id: true },
+      });
+
+      await tx.formSubmission.updateMany({
+        where: {
+          tenantId,
+          investigationId,
+          status: { not: SubmissionStatus.SUPERSEDED },
+          ...(draft ? { id: { not: draft.id } } : {}),
+        },
+        data: { status: SubmissionStatus.SUPERSEDED },
+      });
+
+      const submitted = {
+        formVersionId,
+        status: SubmissionStatus.SUBMITTED,
+        answers: answers as never,
+        autoValidation: autoValidation as never,
+        submittedByType: principal.principalType,
+        submittedById: principal.id,
+        submittedAt: new Date(),
+        clientSubmissionId,
+      };
+
+      return draft
+        ? tx.formSubmission.update({ where: { id: draft.id }, data: submitted })
+        : tx.formSubmission.create({
+            data: {
+              ...submitted,
+              tenantId,
+              investigationId,
+              attempt: (lastAttempt._max.attempt ?? 0) + 1,
+            },
+          });
+    });
+  }
+
   /** Every attempt, newest first — what the QC screen's history tab shows. */
   async history(tenantId: string, investigationId: string) {
     return this.prisma.formSubmission.findMany({
@@ -553,6 +706,7 @@ export class SubmissionsService {
     investigationId: string,
     schema: FormSchema,
     answers: Record<string, unknown>,
+    options: { expectGps?: boolean } = {},
   ): Promise<{
     passed: boolean;
     checkedAt: string;
@@ -635,7 +789,11 @@ export class SubmissionsService {
     //    2 km, not 100 m: the target coordinates come from geocoding a
     //    hand-typed Egyptian address, and a tight radius would reject honest
     //    visits far more often than it would catch a dishonest one.
-    if (investigation.targetLat && investigation.targetLng) {
+    if (
+      options.expectGps !== false &&
+      investigation.targetLat &&
+      investigation.targetLng
+    ) {
       const checkIn = await this.prisma.gpsEvent.findFirst({
         where: { tenantId, investigationId, eventType: 'CHECK_IN' },
         orderBy: { recordedAt: 'desc' },

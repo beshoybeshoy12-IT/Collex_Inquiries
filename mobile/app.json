@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Collex Field",
+    "slug": "collex-field",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "collexfield",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.collex.field",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Collex Field records your location when you check in at a visit address.",
+        "NSCameraUsageDescription": "Collex Field uses the camera to photograph the visit as evidence.",
+        "NSPhotoLibraryUsageDescription": "Collex Field lets you attach photos you already took at the visit."
+      }
+    },
+    "android": {
+      "package": "com.collex.field",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1220",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-localization",
+        {
+          "supportedLocales": { "ios": ["ar", "en"], "android": ["ar", "en"] }
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Collex Field records your location when you check in at a visit address."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Collex Field uses the camera to photograph the visit as evidence.",
+          "photosPermission": "Collex Field lets you attach photos you already took at the visit."
+        }
+      ],
+      "expo-notifications"
+    ]
+  }
+}

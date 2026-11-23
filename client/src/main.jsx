@@ -8,7 +8,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // right direction. A page that renders left-to-right and then flips is
 // visibly broken for the moment it takes.
 import './i18n';
+// Applies light/dark and keeps following the OS when set to "system".
+import './theme';
 
+// One typeface for both scripts, so Arabic and Latin share a weight and
+// x-height instead of one looking borrowed from another system font.
+import '@fontsource/ibm-plex-sans-arabic/400.css';
+import '@fontsource/ibm-plex-sans-arabic/500.css';
+import '@fontsource/ibm-plex-sans-arabic/600.css';
+import '@fontsource/ibm-plex-sans-arabic/700.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import './assets/styles/app.css';
 

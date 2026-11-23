@@ -130,6 +130,27 @@ describe('case status machine', () => {
       );
     });
 
+    it('lets the office hand in a paper form — through the form only', () => {
+      // A paper visit never recorded ACCEPTED/ON_SITE/IN_PROGRESS in the app,
+      // so the office may submit from wherever the field work stands. But
+      // "submitted" must mean there are answers: from the status bar (no
+      // viaForm) it stays refused, exactly as the test above requires.
+      for (const from of [S.ASSIGNED, S.ACCEPTED, S.EN_ROUTE, S.ON_SITE, S.IN_PROGRESS, S.REWORK]) {
+        expect(() => assertTransition(from, S.SUBMITTED, WEB)).toThrow(IllegalTransitionError);
+        expect(() =>
+          assertTransition(from, S.SUBMITTED, WEB, undefined, { viaForm: true }),
+        ).not.toThrow();
+      }
+      // The investigator's own submit is unaffected.
+      expect(() => assertTransition(S.IN_PROGRESS, S.SUBMITTED, FIELD)).not.toThrow();
+    });
+
+    it('never offers a form-only move on the status bar', () => {
+      expect(allowedNextStatuses(S.IN_PROGRESS, WEB)).not.toContain(S.SUBMITTED);
+      expect(allowedNextStatuses(S.ASSIGNED, WEB)).not.toContain(S.SUBMITTED);
+      expect(allowedNextStatuses(S.IN_PROGRESS, FIELD)).toContain(S.SUBMITTED);
+    });
+
     it('does not let a human fire the system-only transitions', () => {
       expect(() =>
         assertTransition(S.SUBMITTED, S.AUTO_VALIDATION, WEB),
