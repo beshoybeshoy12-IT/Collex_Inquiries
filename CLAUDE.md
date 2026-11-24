@@ -17,8 +17,9 @@ and lockfile and installs separately:
 - `client/` — React 19 + Vite 6, Bootstrap 5, TanStack Query, i18next. **JavaScript
   and JSX only.**
 - `server/` — NestJS 11 + Prisma 6 + PostgreSQL 16, BullMQ, Socket.IO, Puppeteer
-- `mobile/` — the investigator's field app: Expo SDK 58 (React Native 0.88), Expo
-  Router, TanStack Query, i18next. **JavaScript and JSX only**, same as `client/`.
+- `mobile/` — the investigator's field app: plain React Native 0.88 (community CLI,
+  **no Expo** — the owner's decision), React Navigation, TanStack Query, i18next.
+  **JavaScript and JSX only**, same as `client/`.
 - root — orchestration scripts only
 
 ## Hard constraints
@@ -36,8 +37,8 @@ These come from the brief and are not open for tidying:
    and completion from the web.
 2. **No TypeScript in `client/` or `mobile/`.** No `.ts`, no `.tsx`, no
    `tsconfig.json`. If a file would benefit from types, use JSDoc. (`mobile/` has the
-   `typescript` package as a dev dependency only because Expo's ESLint config loads
-   its parser.)
+   `typescript` package as a dev dependency only because `@react-native/eslint-config`
+   loads its parser.)
 3. **Never trust a client-supplied `tenantId`.** It is ignored and logged as an
    injection attempt. The tenant comes from the authenticated principal.
 4. **Permissions are enforced server-side.** Frontend checks hide buttons; they are
@@ -69,15 +70,15 @@ new version; idempotent).
 
 Client (`cd client`): `npm run dev`, `npm run build`, `npm run lint`.
 
-Mobile (`cd mobile`): `npx expo start` (scan the QR with a development build, or
-Expo Go for everything except push), `npm run web` (browser preview on 8081),
-`npm run lint`, `npm run export:web` (full Metro bundle — the fastest "does it
-compile" check). Add packages with `npx expo install <pkg>`, never plain `npm
-install`, so versions match the SDK. Set `EXPO_PUBLIC_API_URL` in `mobile/.env`
-(see `.env.example`); a phone needs the computer's LAN address, not `localhost`. The
-browser preview also needs `http://localhost:8081` in the server's `CORS_ORIGINS`;
-the native app is not subject to CORS. Read `mobile/AGENTS.md` before touching Expo
-APIs — they change every SDK.
+Mobile (`cd mobile`): `npm start` (Metro) + `npm run android` (emulator or USB
+phone), `npm run lint`, `npm run check:bundle` (full release bundle — the fastest
+"does it compile" check), `npm run build:apk`. **No Expo anywhere** — no `expo-*`
+packages, no EAS, no Expo Go; pick plain React Native community libraries. Settings
+are `API_URL` and the optional test-build `DEMO_*` in `mobile/.env` (see
+`.env.example`), inlined by `react-native-dotenv` and read only in
+`src/lib/env.js`; a phone needs the computer's LAN address, not `localhost`. There
+is no web preview. Read `mobile/AGENTS.md` before building: on Windows the native
+build needs `LongPathsEnabled=1` and the SDK's newest CMake.
 
 ### Command gotchas
 
@@ -135,11 +136,19 @@ them: `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`. `SEED_ADMIN_PASSWORD` 
 required before the seed will run, and **there is no fallback password anywhere.**
 
 Also read: `PORT` (5100), `REDIS_URL`, `CORS_ORIGINS`, `CLIENT_URL`, `TRUST_PROXY`,
-`STORAGE_DRIVER` + the `S3_*` block, `EMAIL_*`, `JWT_*_EXPIRES_IN`,
-`AUTH_MAX_FAILED_LOGINS`, `AUTH_LOCKOUT_MINUTES`, `SLA_SWEEP_CRON`, the `*_RETENTION_DAYS`
-knobs, `LOG_LEVEL`.
+`STORAGE_DRIVER` + the `S3_*` block, `PUSH_DRIVER` + the `FCM_*` block, `EMAIL_*`,
+`JWT_*_EXPIRES_IN`, `AUTH_MAX_FAILED_LOGINS`, `AUTH_LOCKOUT_MINUTES`, `SLA_SWEEP_CRON`,
+the `*_RETENTION_DAYS` knobs, `LOG_LEVEL`.
 
-Client reads `VITE_API_URL` only; unset in dev so it falls back to the Vite proxy.
+**No Expo, and no Expo cloud services.** Push goes straight to Firebase Cloud Messaging
+(`server/src/push/drivers/fcm.driver.ts`, HTTP v1 signed with `node:crypto`, no
+`firebase-admin`); the app will register its raw FCM token (not wired yet: it needs the company's
+`google-services.json` in `mobile/android/app/`).
+`PUSH_DRIVER=fcm` with missing credentials refuses to boot.
+
+Client reads `VITE_API_URL`, plus `VITE_GOOGLE_MAPS_API_KEY` / `VITE_GOOGLE_MAPS_MAP_ID`
+for the live map (`client/.env.example`). The Maps key is a browser key — restrict it
+by referrer in Google Cloud; without it the map falls back to a key-less view.
 
 ## Architecture
 
@@ -295,6 +304,13 @@ should be warnings make the tool hated; warnings that should be errors route wor
 the wrong client. `row-validator.spec.ts` states each choice in words — if you change
 one, change the test's reasoning too.
 
+**Uploads start inside a client** ("الجهات", `ClientAccount`, `/clients`). Each client
+keeps its own template (`templateFields`: its file's columns, in order, each linked to an
+import field or kept as a client-only field). Its template is the mapping, every case the
+upload creates gets `clientAccountId`, client-only values ride on the case in
+`additionalData.clientFields` (label kept with the value), and the client's logo heads the
+printed inquiry sheet. Application-number duplicates are checked within one client only.
+
 Cells starting `=`, `+`, `-`, `@` are prefixed with `'`. This is not paranoia: an
 exported name of `=cmd|'/c calc'!A1` is code execution for whoever opens the file.
 
@@ -313,6 +329,12 @@ exported name of `=cmd|'/c calc'!A1` is code execution for whoever opens the fil
   deliberately.
 - **Storage is an interface** in `server/src/storage/`. Presigned upload and download,
   keys prefixed `t/<tenantId>/`. Nothing outside that folder imports the AWS SDK.
+- **Internal chat** (`server/src/chat/`, `client/src/modules/chat/ChatDock.jsx`) is
+  one-to-one, office ↔ office and office ↔ investigator (never investigator ↔
+  investigator), one thread per pair by a unique `pairKey`. Files are accepted by their
+  bytes (`attachmentType`), served opaque to participants only, every download audited;
+  deleting a message leaves a visible trace. Retention is `tenant.settings.chatRetentionDays`
+  (default 365, 30–3650), pruned by the nightly sweep. Same routes for the app and the web.
 - **Socket.IO sends signals, not data** — "case 123 changed", and the client refetches
   over REST so the permission checks stay in one place.
 
@@ -376,6 +398,7 @@ memory:
 | why is this header not mapping | `server/src/imports/utils/field-catalog.ts` |
 | why is this investigator not suggested | `server/src/assignments/auto-assign.engine.ts` |
 | why did that 403 | `server/src/common/guards/permissions.guard.ts` |
+| how a client's template becomes an import | `server/src/clients/clients.util.ts` |
 | who can create a company | `server/src/tenants/tenants.controller.ts` |
 | how is the operator account made | `server/prisma/seed-platform-admin.ts` |
 | how does direction flip | `client/src/i18n/index.js` |

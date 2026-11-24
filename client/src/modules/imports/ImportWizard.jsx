@@ -8,6 +8,32 @@ import { useProducts, useInvestigationTypes } from '../../hooks/useCatalog';
 import PageHeader, { Panel } from '../../components/PageHeader';
 import { useToast } from '../../components/Toast';
 import { StateBadge } from '../../components/Badges';
+import { saveErrorMessage, saveFromApi } from '../../utils/saveFromApi';
+import ClientLogo from '../clients/ClientLogo';
+import { FixPanel, RowEditModal } from './ImportFixes';
+import { useAuth } from '../../app/AuthContext';
+import { ConfirmDialog } from '../../components/Modal';
+import { P } from '../../utils/permissions';
+
+/** Headers compare as the same column regardless of case and spacing. */
+const headerKey = (header) => String(header).trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * A client's template, matched against the headers actually in the file:
+ * `{ mapping, missing }` — the mapping for the columns found, and the client
+ * columns the file does not have.
+ */
+function clientMapping(client, headers) {
+  const byKey = new Map(headers.map((header) => [headerKey(header), header]));
+  const mapping = {};
+  const missing = [];
+  for (const field of client.templateFields ?? []) {
+    const found = byKey.get(headerKey(field.header));
+    if (!found) missing.push(field.header);
+    else if (field.target) mapping[field.target] = found;
+  }
+  return { mapping, missing };
+}
 
 const STEPS = ['upload', 'map', 'preview', 'confirm'];
 
@@ -27,11 +53,21 @@ const STEPS = ['upload', 'map', 'preview', 'confirm'];
  *  THE PREVIEW SHOWS THE USER THEIR OWN SPREADSHEET with the problems marked
  *  in place, because the person fixing it is looking at the original file. A
  *  summary saying "412 rows failed" is not something anybody can act on.
+ *
+ *  INSIDE A CLIENT (`client` given) the client's template is the mapping:
+ *  its columns are matched by name, its defaults pre-fill the product and
+ *  type, and every case created belongs to it.
+ *
+ * @param {{ client?: object }} props
  */
-export default function ImportWizard() {
+export default function ImportWizard({ client = null }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const toast = useToast();
+  const save = (path, fileName) =>
+    saveFromApi(path, { fileName }).catch(async (error) =>
+      toast.error(localiseServerMessage(await saveErrorMessage(error, t))),
+    );
   const queryClient = useQueryClient();
   const fileInput = useRef(null);
 
@@ -47,19 +83,29 @@ export default function ImportWizard() {
   // Wiring a number input in step 1 is all that is missing.
   const headerRow = 1;
   const [defaults, setDefaults] = useState({
-    defaultProductId: '',
-    defaultInvestigationTypeId: '',
+    // A client limited to one product / type has, in effect, a default.
+    defaultProductId: client?.productIds?.length === 1 ? client.productIds[0] : '',
+    defaultInvestigationTypeId:
+      client?.investigationTypeIds?.length === 1 ? client.investigationTypeIds[0] : '',
     defaultPriority: 'NORMAL',
   });
+  const [missingColumns, setMissingColumns] = useState([]);
   const [batch, setBatch] = useState(null);
   const [includeDuplicates, setIncludeDuplicates] = useState(false);
 
-  const { data: products } = useProducts();
-  const { data: types } = useInvestigationTypes();
+  const { data: allProducts } = useProducts();
+  const { data: allTypes } = useInvestigationTypes();
+  // Inside a client, only what the client has (an empty list means all).
+  const within = (list, ids) =>
+    ids?.length ? (list ?? []).filter((item) => ids.includes(item.id)) : list;
+  const products = within(allProducts, client?.productIds);
+  const types = within(allTypes, client?.investigationTypeIds);
 
   const { data: savedMappings } = useQuery({
     queryKey: ['import-mappings'],
     queryFn: async () => (await api.get('/imports/mappings/all')).data,
+    // Inside a client its template is the mapping; the saved ones do not apply.
+    enabled: !client,
   });
 
   // ── Step 1: inspect ───────────────────────────────────────────────────────
@@ -79,7 +125,15 @@ export default function ImportWizard() {
     onSuccess: (result) => {
       setInspection(result);
       setSheetName(result.sheetName);
-      setMapping(result.suggestedMapping ?? {});
+      if (client) {
+        const matched = clientMapping(client, result.headers ?? []);
+        // The client's columns first; the alias guess fills only what the
+        // template does not cover.
+        setMapping({ ...(result.suggestedMapping ?? {}), ...matched.mapping });
+        setMissingColumns(matched.missing);
+      } else {
+        setMapping(result.suggestedMapping ?? {});
+      }
       setStep(1);
     },
     onError: (error) => toast.error(localiseServerMessage(error.friendlyMessage)),
@@ -93,6 +147,7 @@ export default function ImportWizard() {
       body.append('sheetName', sheetName);
       body.append('headerRow', String(headerRow));
       body.append('mapping', JSON.stringify(mapping));
+      if (client) body.append('clientAccountId', client.id);
       if (defaults.defaultProductId)
         body.append('defaultProductId', defaults.defaultProductId);
       if (defaults.defaultInvestigationTypeId)
@@ -147,25 +202,77 @@ export default function ImportWizard() {
     return new Set(used.filter((column, index) => used.indexOf(column) !== index));
   }, [mapping]);
 
-  const canPrepare =
-    Object.keys(mapping).length > 0 &&
-    duplicateColumns.size === 0 &&
-    (mapping.product || defaults.defaultProductId) &&
-    (mapping.investigationType || defaults.defaultInvestigationTypeId);
+  // Columns nothing will read — not linked here and not in the client's
+  // template. They are not lost: the server keeps them on each case as extra
+  // information. A warning, never a block.
+  const extraHeaders = useMemo(() => {
+    if (!inspection) return [];
+    const used = new Set(
+      [
+        ...Object.values(mapping),
+        ...(client?.templateFields ?? []).filter((field) => !field.target).map((field) => field.header),
+      ].map(headerKey),
+    );
+    return (inspection.headers ?? []).filter((header) => header && !used.has(headerKey(header)));
+  }, [inspection, mapping, client]);
+
+  // What must be fixed before upload, because it would write a wrong or
+  // incomplete case. Shown next to the button, so a disabled "Next" says why.
+  const blockers = [
+    Object.keys(mapping).length === 0 && t('imports.block.nothingMapped'),
+    duplicateColumns.size > 0 && t('imports.block.duplicateColumns'),
+    !mapping.fullName && t('imports.block.noName'),
+    !(mapping.product || defaults.defaultProductId) && t('imports.block.noProduct'),
+    !(mapping.investigationType || defaults.defaultInvestigationTypeId) && t('imports.block.noType'),
+  ].filter(Boolean);
+  const canPrepare = blockers.length === 0;
 
   return (
     <>
       <PageHeader
-        title={t('imports.title')}
+        title={
+          client ? (
+            <span className="d-inline-flex align-items-center gap-2">
+              <BackButton
+                onClick={() =>
+                  step > 0 ? setStep(step - 1) : navigate(`/clients/${client.id}`)
+                }
+              />
+              <ClientLogo client={client} size={32} />
+              {t('clients.importInto', { name: localisedName(client, i18n.language) })}
+            </span>
+          ) : (
+            <span className="d-inline-flex align-items-center gap-2">
+              <BackButton onClick={() => (step > 0 ? setStep(step - 1) : navigate(-1))} />
+              {t('imports.title')}
+            </span>
+          )
+        }
         actions={
-          <a
-            className="btn btn-sm btn-outline-secondary"
-            href="/api/v1/imports/template"
-            download
-          >
-            <i className="bi bi-download me-1" aria-hidden="true" />
-            {t('imports.downloadTemplate')}
-          </a>
+          client ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() =>
+                save(
+                  `/clients/${client.id}/template?lang=${i18n.language === 'en' ? 'en' : 'ar'}`,
+                  t('clients.templateFileName', { name: localisedName(client, i18n.language) }),
+                )
+              }
+            >
+              <i className="bi bi-download me-1" aria-hidden="true" />
+              {t('clients.downloadTemplate')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() => save('/imports/template', 'collex-import-template.xlsx')}
+            >
+              <i className="bi bi-download me-1" aria-hidden="true" />
+              {t('imports.downloadTemplate')}
+            </button>
+          )
         }
       />
 
@@ -217,6 +324,12 @@ export default function ImportWizard() {
                 />
                 <p className="fw-semibold mt-3 mb-1">{t('imports.chooseFile')}</p>
                 <p className="text-body-secondary small mb-0">{t('imports.dropHint')}</p>
+                {client && (
+                  <p className="text-body-secondary small mt-2 mb-0">
+                    <i className="bi bi-buildings me-1" aria-hidden="true" />
+                    {t('clients.uploadBelongs', { name: localisedName(client, i18n.language) })}
+                  </p>
+                )}
               </>
             )}
           </div>
@@ -299,7 +412,15 @@ export default function ImportWizard() {
           <div className="row g-3">
             <div className="col-12 col-lg-7">
               <Panel title={t('imports.mapColumns')}>
-                <p className="small text-body-secondary">{t('imports.mapHint')}</p>
+                <p className="small text-body-secondary">
+                  {client ? t('clients.mapHint') : t('imports.mapHint')}
+                </p>
+                {missingColumns.length > 0 && (
+                  <div className="alert alert-warning py-2 px-3 small">
+                    <i className="bi bi-exclamation-triangle me-1" aria-hidden="true" />
+                    {t('clients.missingColumns')}: <strong>{missingColumns.join('، ')}</strong>
+                  </div>
+                )}
 
                 <div className="table-responsive" style={{ maxHeight: 420 }}>
                   <table className="table table-sm align-middle">
@@ -440,11 +561,21 @@ export default function ImportWizard() {
                 </div>
               </Panel>
 
-              {inspection.unmappedHeaders?.length > 0 && (
-                <Panel title={t('imports.unmappedHeaders')}>
+              {extraHeaders.length > 0 && (
+                <Panel
+                  title={
+                    <span className="text-warning-emphasis">
+                      <i className="bi bi-info-circle me-1" aria-hidden="true" />
+                      {t('imports.extraTitle', { count: extraHeaders.length })}
+                    </span>
+                  }
+                >
+                  <p className="small text-body-secondary">
+                    {client ? t('imports.extraHintClient') : t('imports.extraHint')}
+                  </p>
                   <div className="d-flex flex-wrap gap-1">
-                    {inspection.unmappedHeaders.map((header) => (
-                      <span key={header} className="badge text-bg-light">
+                    {extraHeaders.map((header) => (
+                      <span key={header} className="badge bg-warning-subtle extra-col">
                         {header}
                       </span>
                     ))}
@@ -453,6 +584,20 @@ export default function ImportWizard() {
               )}
             </div>
           </div>
+
+          {blockers.length > 0 && (
+            <div className="alert alert-danger py-2 px-3 small mt-3 mb-0">
+              <div className="fw-semibold mb-1">
+                <i className="bi bi-exclamation-octagon me-1" aria-hidden="true" />
+                {t('imports.block.title')}
+              </div>
+              <ul className="mb-0 ps-3">
+                {blockers.map((blocker) => (
+                  <li key={blocker}>{blocker}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="d-flex justify-content-between mt-3">
             <button
@@ -481,6 +626,8 @@ export default function ImportWizard() {
       {step === 2 && batch && (
         <PreviewStep
           batch={batch}
+          client={client}
+          onBatchChange={setBatch}
           onBack={() => setStep(1)}
           onContinue={() => setStep(3)}
         />
@@ -528,12 +675,15 @@ export default function ImportWizard() {
           {batch.invalidRows > 0 && (
             <div className="alert alert-warning py-2 px-3 small">
               {t('imports.errorReportHint')}
-              <a
+              <button
+                type="button"
                 className="btn btn-sm btn-outline-secondary ms-2"
-                href={`/api/v1/imports/${batch.id}/error-report`}
+                onClick={() =>
+                  save(`/imports/${batch.id}/error-report`, `${batch.reference}-errors.xlsx`)
+                }
               >
                 {t('imports.downloadErrors')}
-              </a>
+              </button>
             </div>
           )}
 
@@ -584,10 +734,70 @@ function SummaryTile({ label, value, tone }) {
  * has to do anything about — opening on 4,800 valid rows buries the 12 that
  * need attention.
  */
-function PreviewStep({ batch, onBack, onContinue }) {
+function PreviewStep({ batch, client, onBatchChange, onBack, onContinue }) {
   const { t, i18n } = useTranslation();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { can } = useAuth();
+  const canAccept = can(P.IMPORTS_RESOLVE_DUPLICATES);
   const [status, setStatus] = useState(batch.invalidRows > 0 ? 'INVALID' : '');
   const [page, setPage] = useState(1);
+  const [editing, setEditing] = useState(null);
+
+  // A fix re-checks the batch: take the new counts and reload the rows.
+  const onFixed = (updated) => {
+    onBatchChange({ ...batch, ...updated });
+    queryClient.invalidateQueries({ queryKey: ['import-rows', batch.id] });
+  };
+
+  // "Not a problem": a flagged duplicate is a real second inquiry. The row is
+  // imported as it is; the flag stays on record as the user's decision.
+  const accept = useMutation({
+    mutationFn: async (rowNumbers) => {
+      let numbers = rowNumbers;
+      if (numbers === 'all') {
+        numbers = [];
+        for (let pageNo = 1; ; pageNo++) {
+          const result = (
+            await api.get(`/imports/${batch.id}/rows`, {
+              params: { status: 'DUPLICATE', page: pageNo, limit: 200 },
+            })
+          ).data;
+          numbers.push(...result.data.map((row) => row.rowNumber));
+          if (!result.meta?.hasNext) break;
+        }
+      }
+      await api.post(`/imports/${batch.id}/resolve-duplicates`, {
+        resolutions: numbers.map((rowNumber) => ({ rowNumber, action: 'CREATE_ANYWAY' })),
+      });
+      return (await api.get(`/imports/${batch.id}`)).data;
+    },
+    onSuccess: (updated) => {
+      onFixed(updated);
+      toast.success(t('imports.dup.accepted'));
+    },
+    onError: (error) => toast.error(localiseServerMessage(error.friendlyMessage)),
+  });
+
+  // "Delete": leave rows out of this import and carry on with the rest. They
+  // stay staged as skipped, so the batch still shows what the file held.
+  const [confirmDropAll, setConfirmDropAll] = useState(false);
+  const drop = useMutation({
+    mutationFn: async (body) => (await api.post(`/imports/${batch.id}/fix`, body)).data,
+    onSuccess: (updated) => {
+      onFixed(updated);
+      setConfirmDropAll(false);
+      toast.success(t('imports.drop.done'));
+    },
+    onError: (error) => toast.error(localiseServerMessage(error.friendlyMessage)),
+  });
+
+  const ruleText = (match) =>
+    match.rule === 'IN_FILE'
+      ? t('imports.dup.IN_FILE', { row: match.rowNumber })
+      : i18n.exists(`imports.dup.${match.rule}`)
+        ? t(`imports.dup.${match.rule}`)
+        : match.rule;
 
   const { data, isLoading } = useQuery({
     queryKey: ['import-rows', batch.id, status, page],
@@ -618,6 +828,8 @@ function PreviewStep({ batch, onBack, onContinue }) {
         />
       </div>
 
+      <FixPanel batch={batch} client={client} onFixed={onFixed} />
+
       {summary?.topErrors?.length > 0 && (
         <Panel title={t('imports.topErrors')} className="mb-3">
           <ul className="list-unstyled mb-0 small">
@@ -637,6 +849,29 @@ function PreviewStep({ batch, onBack, onContinue }) {
       <Panel
         title={t('imports.steps.preview')}
         actions={
+          <div className="d-flex gap-2">
+          {batch.invalidRows > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-danger text-nowrap"
+              disabled={drop.isPending}
+              onClick={() => setConfirmDropAll(true)}
+            >
+              <i className="bi bi-trash3 me-1" aria-hidden="true" />
+              {t('imports.drop.allInvalid', { count: batch.invalidRows })}
+            </button>
+          )}
+          {canAccept && batch.duplicateRows > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-success text-nowrap"
+              disabled={accept.isPending}
+              onClick={() => accept.mutate('all')}
+            >
+              <i className="bi bi-check2-all me-1" aria-hidden="true" />
+              {t('imports.dup.acceptAll', { count: batch.duplicateRows })}
+            </button>
+          )}
           <select
             className="form-select form-select-sm"
             style={{ width: 'auto' }}
@@ -653,6 +888,7 @@ function PreviewStep({ batch, onBack, onContinue }) {
               </option>
             ))}
           </select>
+          </div>
         }
       >
         {isLoading ? (
@@ -666,6 +902,7 @@ function PreviewStep({ batch, onBack, onContinue }) {
                   <th style={{ width: 120 }}>{t('common.status')}</th>
                   <th>{t('customers.customer')}</th>
                   <th>{t('imports.problems')}</th>
+                  <th style={{ width: 260 }} />
                 </tr>
               </thead>
               <tbody>
@@ -674,9 +911,9 @@ function PreviewStep({ batch, onBack, onContinue }) {
                     key={row.id}
                     className={
                       row.status === 'INVALID'
-                        ? 'table-danger'
+                        ? 'import-row import-row--danger'
                         : row.status === 'DUPLICATE'
-                          ? 'table-warning'
+                          ? 'import-row import-row--warning'
                           : undefined
                     }
                   >
@@ -711,16 +948,48 @@ function PreviewStep({ batch, onBack, onContinue }) {
                       ))}
                       {row.duplicateOf?.length > 0 && (
                         <div className="text-warning-emphasis">
-                          {t('imports.duplicateOf')}:{' '}
-                          {row.duplicateOf
-                            .map((match) =>
-                              match.rule === 'IN_FILE'
-                                ? `${t('imports.row')} ${match.rowNumber}`
-                                : match.rule,
-                            )
-                            .join(', ')}
+                          <i className="bi bi-copy me-1" aria-hidden="true" />
+                          {row.duplicateOf.map(ruleText).join(' · ')}
                         </div>
                       )}
+                    </td>
+                    <td className="text-end">
+                      <div className="d-inline-flex gap-1">
+                        {row.status === 'DUPLICATE' && canAccept && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-success text-nowrap"
+                            disabled={accept.isPending}
+                            onClick={() => accept.mutate([row.rowNumber])}
+                            title={t('imports.dup.acceptHint')}
+                          >
+                            <i className="bi bi-check2 me-1" aria-hidden="true" />
+                            {t('imports.dup.accept')}
+                          </button>
+                        )}
+                        {row.status !== 'VALID' && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary text-nowrap"
+                            onClick={() => setEditing(row)}
+                          >
+                            <i className="bi bi-pencil me-1" aria-hidden="true" />
+                            {t('common.edit')}
+                          </button>
+                        )}
+                        {row.status !== 'VALID' && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger text-nowrap"
+                            disabled={drop.isPending}
+                            onClick={() => drop.mutate({ skipRows: [row.rowNumber] })}
+                            title={t('imports.drop.rowHint')}
+                          >
+                            <i className="bi bi-trash3 me-1" aria-hidden="true" />
+                            {t('common.delete')}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -764,15 +1033,64 @@ function PreviewStep({ batch, onBack, onContinue }) {
         <button type="button" className="btn btn-outline-secondary" onClick={onBack}>
           {t('common.back')}
         </button>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={onContinue}
-          disabled={batch.validRows === 0 && batch.duplicateRows === 0}
-        >
-          {t('common.next')}
-        </button>
+        <div className="d-flex align-items-center gap-2">
+          {batch.invalidRows > 0 && batch.validRows + batch.duplicateRows > 0 && (
+            <span className="small text-body-secondary d-none d-md-inline">
+              {t('imports.fix.skipNote', { count: batch.invalidRows })}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onContinue}
+            disabled={batch.validRows === 0 && batch.duplicateRows === 0}
+          >
+            {batch.invalidRows > 0
+              ? t('imports.fix.continueValid', { count: batch.validRows + batch.duplicateRows })
+              : t('common.next')}
+          </button>
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDropAll}
+        onClose={() => setConfirmDropAll(false)}
+        onConfirm={() => drop.mutate({ skipInvalid: true })}
+        title={t('imports.drop.allInvalid', { count: batch.invalidRows })}
+        message={t('imports.drop.confirm', { count: batch.invalidRows })}
+        confirmLabel={t('common.delete')}
+        busy={drop.isPending}
+      />
+
+      {editing && (
+        <RowEditModal
+          key={editing.id}
+          batch={batch}
+          row={editing}
+          client={client}
+          onClose={() => setEditing(null)}
+          onFixed={onFixed}
+        />
+      )}
     </>
+  );
+}
+
+/** A step back, drawn as an arrow beside the title — it points the reading way. */
+function BackButton({ onClick }) {
+  const { t, i18n } = useTranslation();
+  return (
+    <button
+      type="button"
+      className="btn btn-sm btn-icon back-step"
+      onClick={onClick}
+      aria-label={t('common.back')}
+      title={t('common.back')}
+    >
+      <i
+        className={`bi ${i18n.dir() === 'rtl' ? 'bi-arrow-right' : 'bi-arrow-left'}`}
+        aria-hidden="true"
+      />
+    </button>
   );
 }

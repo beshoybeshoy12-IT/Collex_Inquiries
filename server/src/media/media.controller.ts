@@ -38,6 +38,7 @@ import {
   AuthenticatedUser,
 } from '../common/decorators/auth.decorators';
 import { P } from '../common/constants/permissions';
+import { contentDisposition } from '../common/utils/file-name.util';
 
 /**
  * `/api/v1/media`
@@ -120,19 +121,34 @@ export class MediaController {
     @CurrentUser() principal: AuthenticatedPrincipal,
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) res: Response,
+    @Query('inline') inline?: string,
   ) {
-    const result = await this.media.downloadUrl(tenantId, principal, id);
+    const view = inline === '1' || inline === 'true';
+    const result = await this.media.downloadUrl(tenantId, principal, id, view);
 
     if (!result.streamThroughApi) return result;
 
     const file = await this.media.readBytes(tenantId, id);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+
+    // Any type: opaque bytes with nosniff are never rendered, whatever they are.
+    if (view) {
+      // For the in-app viewer: opaque bytes with no file name, which the
+      // browser will neither render on this origin nor hand to a download
+      // manager (one intercepted the PDF otherwise). The page rebuilds the
+      // typed Blob itself from the asset's known MIME type.
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('X-Asset-Type', file.mimeType);
+      res.send(file.buffer);
+      return;
+    }
+
     res.setHeader('Content-Type', file.mimeType);
     // `attachment` rather than `inline`: an uploaded HTML or SVG rendered on
     // this origin would be stored cross-site scripting.
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${file.fileName.replace(/["\\\r\n]/g, '')}"`,
-    );
+    // RFC 5987, so an Arabic name survives (and does not crash the header).
+    res.setHeader('Content-Disposition', contentDisposition(file.fileName));
     res.send(file.buffer);
   }
 

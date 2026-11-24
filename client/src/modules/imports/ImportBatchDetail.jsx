@@ -10,6 +10,7 @@ import ErrorState from '../../components/ErrorState';
 import { ConfirmDialog } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { StateBadge } from '../../components/Badges';
+import { saveErrorMessage, saveFromApi } from '../../utils/saveFromApi';
 
 /**
  * One import batch, after the fact.
@@ -97,13 +98,20 @@ export default function ImportBatchDetail() {
         actions={
           <>
             {batch.invalidRows > 0 && (
-              <a
+              <button
+                type="button"
                 className="btn btn-sm btn-outline-secondary"
-                href={`/api/v1/imports/${id}/error-report`}
+                onClick={() =>
+                  saveFromApi(`/imports/${id}/error-report`, {
+                    fileName: `${batch.reference}-errors.xlsx`,
+                  }).catch(async (error) =>
+                    toast.error(localiseServerMessage(await saveErrorMessage(error, t))),
+                  )
+                }
               >
                 <i className="bi bi-download me-1" aria-hidden="true" />
                 {t('imports.downloadErrors')}
-              </a>
+              </button>
             )}
             {batch.importedRows > 0 && (
               <Link

@@ -17,6 +17,7 @@ import Login from '../modules/auth/Login';
  * means a coordinator on a phone downloads the form builder, the QC packet and
  * the chart library to look at a case list.
  */
+const Home = lazy(() => import('../modules/home/Home'));
 const Dashboard = lazy(() => import('../modules/dashboard/Dashboard'));
 const InvestigationList = lazy(() => import('../modules/investigations/InvestigationList'));
 const InvestigationDetail = lazy(() => import('../modules/investigations/InvestigationDetail'));
@@ -29,6 +30,9 @@ const LiveMap = lazy(() => import('../modules/investigators/LiveMap'));
 const ImportWizard = lazy(() => import('../modules/imports/ImportWizard'));
 const ImportHistory = lazy(() => import('../modules/imports/ImportHistory'));
 const ImportBatchDetail = lazy(() => import('../modules/imports/ImportBatchDetail'));
+const ClientList = lazy(() => import('../modules/clients/ClientList'));
+const ClientEditor = lazy(() => import('../modules/clients/ClientEditor'));
+const ClientImport = lazy(() => import('../modules/clients/ClientImport'));
 const QcQueue = lazy(() => import('../modules/qc/QcQueue'));
 const QcReview = lazy(() => import('../modules/qc/QcReview'));
 const QcStatistics = lazy(() => import('../modules/qc/QcStatistics'));
@@ -113,8 +117,9 @@ export default function App() {
         />
 
         <Route element={<AppLayout />}>
+          <Route index element={<Home />} />
           <Route
-            index
+            path="dashboard"
             element={
               <ProtectedRoute permissions={[P.DASHBOARD_VIEW]}>
                 <Dashboard />
@@ -186,6 +191,39 @@ export default function App() {
             element={
               <ProtectedRoute permissions={[P.INVESTIGATORS_VIEW]}>
                 <InvestigatorDetail />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="clients"
+            element={
+              <ProtectedRoute permissions={[P.CLIENTS_VIEW]}>
+                <ClientList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="clients/new"
+            element={
+              <ProtectedRoute permissions={[P.CLIENTS_MANAGE]}>
+                <ClientEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="clients/:id"
+            element={
+              <ProtectedRoute permissions={[P.CLIENTS_VIEW]}>
+                <ClientEditor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="clients/:id/import"
+            element={
+              <ProtectedRoute permissions={[P.IMPORTS_CREATE]}>
+                <ClientImport />
               </ProtectedRoute>
             }
           />

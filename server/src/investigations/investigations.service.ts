@@ -18,6 +18,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import {
   assertTransition,
+  overrideTransition,
   allowedNextStatuses,
   OPEN_FOR_INVESTIGATOR,
   STATUS_GROUPS,
@@ -44,6 +45,9 @@ const LIST_INCLUDE = {
     select: { id: true, fullName: true, mobile: true, nationalId: true },
   },
   product: { select: { id: true, code: true, nameAr: true, nameEn: true } },
+  clientAccount: {
+    select: { id: true, code: true, nameAr: true, nameEn: true },
+  },
   investigationType: {
     select: {
       id: true,
@@ -261,6 +265,9 @@ export class InvestigationsService {
       ...(query.coordinatorId ? { coordinatorId: query.coordinatorId } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.importBatchId ? { importBatchId: query.importBatchId } : {}),
+      ...(query.clientAccountId
+        ? { clientAccountId: query.clientAccountId }
+        : {}),
       ...(query.unassigned ? { investigatorId: null } : {}),
       ...(query.reworked ? { reworkCount: { gt: 0 } } : {}),
       ...(query.createdFrom || query.createdTo
@@ -496,6 +503,13 @@ export class InvestigationsService {
       );
     }
 
+    if (dto.clientAccountId) {
+      await this.assertClient(tenantId, dto.clientAccountId, {
+        productId: product.id,
+        investigationTypeId: type.id,
+      });
+    }
+
     const priority = dto.priority ?? product.defaultPriority;
 
     const policy = await this.slaPolicies.resolve(tenantId, {
@@ -550,6 +564,7 @@ export class InvestigationsService {
           caseNumber,
           applicationNumber: dto.applicationNumber,
           customerId,
+          clientAccountId: dto.clientAccountId,
           productId: product.id,
           investigationTypeId: type.id,
           priority,
@@ -609,6 +624,36 @@ export class InvestigationsService {
     return investigation;
   }
 
+  /**
+   * An active client of this tenant, or 400 — and, when a product and type are
+   * given, ones the client has (an empty list on the client means all).
+   */
+  private async assertClient(
+    tenantId: string,
+    clientAccountId: string,
+    pick?: { productId: string; investigationTypeId: string },
+  ) {
+    const client = await this.prisma.clientAccount.findFirst({
+      where: { tenantId, id: clientAccountId, isActive: true },
+      select: { id: true, productIds: true, investigationTypeIds: true },
+    });
+    if (!client) {
+      throw new BadRequestException('الجهة غير موجودة - Client not found');
+    }
+    if (!pick) return;
+    if (
+      (client.productIds.length > 0 &&
+        !client.productIds.includes(pick.productId)) ||
+      (client.investigationTypeIds.length > 0 &&
+        !client.investigationTypeIds.includes(pick.investigationTypeId))
+    ) {
+      throw new BadRequestException(
+        'المنتج أو نوع الاستعلام غير متاح لهذه الجهة - ' +
+          'That product or inquiry type is not enabled for this client',
+      );
+    }
+  }
+
   async update(
     tenantId: string,
     id: string,
@@ -633,6 +678,10 @@ export class InvestigationsService {
     }
 
     const { customer: _inline, customerId, ...scalars } = dto;
+    // The id is a foreign key: one from another tenant would link the case
+    // across the boundary, so it is checked rather than passed through.
+    if (dto.clientAccountId)
+      await this.assertClient(tenantId, dto.clientAccountId);
 
     const updated = await this.prisma.investigation.update({
       where: { id },
@@ -688,13 +737,38 @@ export class InvestigationsService {
   ) {
     const existing = await this.findVisible(tenantId, id, principal);
 
-    const rule = assertTransition(
-      existing.status,
-      dto.status,
-      principal.principalType,
-      dto.reason,
-      options,
-    );
+    // The exceptional move still comes through this one door, so history,
+    // audit, sockets and notifications behave exactly as for a normal one.
+    const override = dto.override === true;
+    if (override) {
+      const allowed =
+        principal.principalType === PrincipalType.WEB_USER &&
+        ((principal as AuthenticatedUser).isSuperAdmin ||
+          (principal as AuthenticatedUser).permissions.includes(
+            P.INVESTIGATIONS_OVERRIDE_STATUS,
+          ));
+      if (!allowed) {
+        throw new ForbiddenException(
+          'ليس لديك صلاحية النقل الاستثنائي - You may not override a case status',
+        );
+      }
+    }
+
+    const rule = override
+      ? overrideTransition(existing.status, dto.status, {
+          hasInvestigator: Boolean(existing.investigatorId),
+          reason: dto.reason,
+        })
+      : assertTransition(
+          existing.status,
+          dto.status,
+          principal.principalType,
+          dto.reason,
+          options,
+        );
+    const historyReason = override
+      ? `[نقل استثنائي - Override] ${dto.reason?.trim()}`
+      : dto.reason;
 
     const now = new Date();
 
@@ -724,7 +798,7 @@ export class InvestigationsService {
           actorType: principal.principalType,
           actorId: principal.id,
           actorName: principal.fullName,
-          reason: dto.reason,
+          reason: historyReason,
         },
       });
 
@@ -733,16 +807,21 @@ export class InvestigationsService {
 
     await this.audit.log({
       tenantId,
-      action: `CASE_${dto.status}`,
+      action: override ? 'CASE_STATUS_OVERRIDE' : `CASE_${dto.status}`,
       category: 'INVESTIGATION',
-      severity:
-        dto.status === InvestigationStatus.CANCELLED ? 'NOTICE' : 'INFO',
+      severity: override
+        ? 'WARNING'
+        : dto.status === InvestigationStatus.CANCELLED
+          ? 'NOTICE'
+          : 'INFO',
       entityType: 'Investigation',
       entityId: id,
       entityLabel: existing.caseNumber,
       oldValue: { status: existing.status },
       newValue: { status: dto.status },
-      metadata: dto.reason ? { reason: dto.reason } : undefined,
+      metadata: dto.reason
+        ? { reason: dto.reason, ...(override ? { override: true } : {}) }
+        : undefined,
     });
 
     this.realtime.emitToTenant(tenantId, 'investigation:status', {

@@ -198,6 +198,7 @@ export class StorageService implements OnModuleInit {
     tenantId: string,
     key: string,
     fileName?: string,
+    inline = false,
   ): Promise<{ url: string; expiresIn: number }> {
     this.assertTenantOwnsKey(tenantId, key);
 
@@ -205,6 +206,7 @@ export class StorageService implements OnModuleInit {
       key,
       expiresIn: this.presignTtlSeconds,
       downloadFileName: fileName,
+      inline,
     });
 
     return { url, expiresIn: this.presignTtlSeconds };

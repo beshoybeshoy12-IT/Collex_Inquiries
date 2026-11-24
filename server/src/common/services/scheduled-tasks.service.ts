@@ -8,6 +8,7 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { GpsService } from '../../gps/gps.service';
 import { MediaService } from '../../media/media.service';
 import { TokenService } from '../../auth/token.service';
+import { ChatService } from '../../chat/chat.service';
 import { RequestContextService } from '../context/request-context';
 import { env, envInt } from '../config/env';
 
@@ -43,6 +44,7 @@ export class ScheduledTasksService {
     private readonly gps: GpsService,
     private readonly media: MediaService,
     private readonly tokens: TokenService,
+    private readonly chat: ChatService,
     private readonly requestContext: RequestContextService,
   ) {}
 
@@ -121,6 +123,9 @@ export class ScheduledTasksService {
         await run('gpsLocationUpdates', () =>
           this.gps.pruneLocationUpdates(envInt('GPS_RETENTION_DAYS', 90)),
         );
+
+        // Per company: each sets its own chat retention (default a year).
+        await run('chatMessages', () => this.chat.pruneExpired());
 
         await run('abandonedUploads', () => this.media.prunePendingUploads(24));
 

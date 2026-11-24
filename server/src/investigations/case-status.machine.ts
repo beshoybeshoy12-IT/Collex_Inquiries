@@ -494,3 +494,60 @@ export const OPEN_FOR_INVESTIGATOR: InvestigationStatus[] = [
   S.IN_PROGRESS,
   S.REWORK,
 ];
+
+/**
+ * Statuses that only make sense with an investigator on the case. An override
+ * may skip steps, but not invent a field visit with nobody to make it.
+ */
+const NEEDS_INVESTIGATOR = new Set<InvestigationStatus>([
+  ...STATUS_GROUPS.ASSIGNED,
+  ...STATUS_GROUPS.IN_PROGRESS,
+]);
+
+/**
+ * The exceptional move: any status to any other, outside `TRANSITIONS`.
+ *
+ * Used only by holders of `investigations.override_status`, always with a
+ * written reason, and audited as a WARNING. It still stamps the timestamp the
+ * normal route into `to` would have stamped, so SLA and reports read the
+ * case consistently whichever way it got there.
+ */
+export function overrideTransition(
+  from: InvestigationStatus,
+  to: InvestigationStatus,
+  context: { hasInvestigator: boolean; reason?: string },
+): TransitionRule {
+  if (from === to) {
+    throw new IllegalTransitionError(
+      from,
+      to,
+      'الاستعلام بالفعل في هذه الحالة - The case is already in this status',
+    );
+  }
+  if ((context.reason?.trim().length ?? 0) < 5) {
+    throw new IllegalTransitionError(
+      from,
+      to,
+      'النقل الاستثنائي يحتاج سببًا واضحًا - An override needs a reason',
+    );
+  }
+  if (NEEDS_INVESTIGATOR.has(to) && !context.hasInvestigator) {
+    throw new IllegalTransitionError(
+      from,
+      to,
+      'أسند الاستعلام لباحث أولًا - Assign an investigator first',
+    );
+  }
+
+  const stamps = TRANSITIONS.find(
+    (rule) => rule.to === to && rule.stamps,
+  )?.stamps;
+  return {
+    from,
+    to,
+    actors: ['WEB_USER'],
+    requiresReason: true,
+    stamps,
+    description: 'Exceptional move by an authorised user',
+  };
+}

@@ -3,13 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
 import EmptyState from '../../components/EmptyState';
 import ErrorState from '../../components/ErrorState';
+import { actionLabel, changeLines, severityLabel } from '../../utils/auditLabels';
 
 /**
- * The audit trail for one case.
+ * The audit trail for one case, as sentences.
  *
- * Shows the changed fields rather than whole rows, because that is what the
- * server stores — a diff is readable, and it does not duplicate every national
- * id and address into a second table.
+ * "Mahmoud moved the case to On site", not `CASE_ON_SITE` with
+ * `status: EN_ROUTE → ON_SITE`. The code stays on hover for whoever needs it.
+ * Internal ids are never shown; a changed investigator reads "Investigator:
+ * changed".
  */
 export default function CaseAudit({ investigationId }) {
   const { t, i18n } = useTranslation();
@@ -39,75 +41,88 @@ export default function CaseAudit({ investigationId }) {
     return <EmptyState title={t('audit.noEntries')} icon="shield-check" />;
   }
 
+  const locale = i18n.language === 'en' ? 'en-GB' : 'ar-EG';
+
   return (
     <div className="card">
-      <div className="table-responsive">
-        <table className="table table-sm align-middle mb-0">
-          <thead>
-            <tr>
-              <th>{t('audit.action')}</th>
-              <th>{t('audit.actor')}</th>
-              <th>{t('audit.changes')}</th>
-              <th>{t('common.createdAt')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((entry) => (
-              <tr key={entry.id}>
-                <td>
-                  <span className="mono small">{entry.action}</span>
-                  {entry.severity !== 'INFO' && (
-                    <span
-                      className={`badge ms-2 text-bg-${severityTone(entry.severity)}`}
-                    >
-                      {entry.severity}
+      <ul className="audit-feed">
+        {rows.map((entry) => {
+          const lines = changeLines(entry.oldValue, entry.newValue, t, i18n);
+          const reason = entry.metadata?.reason;
+          const system = !entry.actorName;
+          return (
+            <li key={entry.id} className={`audit-entry audit-${entry.severity?.toLowerCase()}`}>
+              <span className="audit-entry__dot" aria-hidden="true">
+                <i className={`bi bi-${iconFor(entry)}`} />
+              </span>
+              <div className="audit-entry__body">
+                <div className="audit-entry__head">
+                  <span className="audit-entry__action" title={entry.action}>
+                    {actionLabel(entry.action, t, i18n)}
+                  </span>
+                  {entry.severity && entry.severity !== 'INFO' && (
+                    <span className={`audit-entry__severity sev-${entry.severity.toLowerCase()}`}>
+                      {severityLabel(entry.severity, t, i18n)}
                     </span>
                   )}
-                </td>
-                <td className="small">{entry.actorName ?? 'system'}</td>
-                <td className="small">
-                  <ChangeList oldValue={entry.oldValue} newValue={entry.newValue} />
-                </td>
-                <td className="small text-nowrap">
-                  {new Date(entry.createdAt).toLocaleString(i18n.language)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </div>
+                <div className="audit-entry__meta">
+                  <span>
+                    <i
+                      className={`bi ${system ? 'bi-cpu' : 'bi-person'} me-1`}
+                      aria-hidden="true"
+                    />
+                    {system ? t('auditMisc.system') : entry.actorName}
+                  </span>
+                  <span>{new Date(entry.createdAt).toLocaleString(locale)}</span>
+                </div>
+                {lines.length > 0 && (
+                  <ul className="audit-entry__changes">
+                    {lines.map((line) => (
+                      <li key={line.key}>
+                        <span className="text-body-secondary">{line.label}:</span>{' '}
+                        {line.idOnly ? (
+                          <span>{t('auditMisc.changed')}</span>
+                        ) : (
+                          <>
+                            {line.from !== '—' && (
+                              <>
+                                <span className="audit-entry__from">{line.from}</span>{' '}
+                                <i className="bi bi-arrow-left-short audit-arrow" aria-hidden="true" />{' '}
+                              </>
+                            )}
+                            <span className="fw-semibold">{line.to}</span>
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {reason && (
+                  <div className="audit-entry__reason">
+                    <span className="text-body-secondary">{t('auditMisc.reason')}:</span>{' '}
+                    <span dir="auto">{reason}</span>
+                  </div>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
 
-function severityTone(severity) {
-  if (severity === 'CRITICAL') return 'danger';
-  if (severity === 'WARNING') return 'warning';
-  if (severity === 'NOTICE') return 'info';
-  return 'secondary';
-}
-
-function ChangeList({ oldValue, newValue }) {
-  if (!newValue || Object.keys(newValue).length === 0) return '—';
-
-  return (
-    <ul className="list-unstyled mb-0">
-      {Object.entries(newValue).map(([key, value]) => (
-        <li key={key}>
-          <span className="text-body-secondary">{key}:</span>{' '}
-          <span className="text-decoration-line-through text-body-tertiary">
-            {formatValue(oldValue?.[key])}
-          </span>{' '}
-          <i className="bi bi-arrow-right" aria-hidden="true" />{' '}
-          <span className="fw-medium">{formatValue(value)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function formatValue(value) {
-  if (value === null || value === undefined) return '—';
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+function iconFor(entry) {
+  const action = entry.action ?? '';
+  if (entry.severity === 'CRITICAL' || action === 'SLA_ESCALATION') return 'alarm';
+  if (action.startsWith('GPS_')) return 'geo-alt';
+  if (action.startsWith('FILE_')) return 'paperclip';
+  if (action.startsWith('ASSIGNMENT_') || action.includes('ASSIGN')) return 'person-check';
+  if (action.startsWith('QC_')) return 'patch-check';
+  if (action.startsWith('REPORT_')) return 'file-earmark-text';
+  if (action.includes('FORM')) return 'ui-checks';
+  if (action === 'CASE_STATUS_OVERRIDE') return 'shield-exclamation';
+  if (action.startsWith('CASE_')) return 'arrow-left-right';
+  return 'dot';
 }

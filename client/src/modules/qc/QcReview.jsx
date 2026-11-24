@@ -7,6 +7,7 @@ import { localisedLabel, localisedName } from '../../i18n';
 import { useAuth } from '../../app/AuthContext';
 import { P } from '../../utils/permissions';
 import { useQcReasons } from '../../hooks/useCatalog';
+import { useAssetUrl } from '../../hooks/useAssetUrl';
 import PageHeader, { Field, Panel } from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import EmptyState from '../../components/EmptyState';
@@ -512,21 +513,16 @@ function renderAnswer(field, value, language) {
 }
 
 function EvidenceThumb({ assetId, alt }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['media-url', assetId],
-    queryFn: async () => (await api.get(`/media/${assetId}/download`)).data,
-    staleTime: 10 * 60_000,
-    retry: false,
-  });
+  const { url } = useAssetUrl(assetId);
 
-  if (isLoading || !data?.url) {
+  if (!url) {
     return <span className="placeholder d-block rounded w-100" style={{ height: 130 }} />;
   }
 
   return (
-    <a href={data.url} target="_blank" rel="noopener noreferrer">
+    <a href={url} target="_blank" rel="noopener noreferrer">
       <img
-        src={data.url}
+        src={url}
         alt={alt}
         style={{ width: '100%', height: 130, objectFit: 'cover' }}
         className="rounded"

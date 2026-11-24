@@ -7,6 +7,14 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import i18n from '../i18n';
+
+const TONE_ICON = {
+  success: 'check-circle-fill',
+  danger: 'exclamation-octagon-fill',
+  warning: 'exclamation-triangle-fill',
+  info: 'info-circle-fill',
+};
 
 /**
  * Transient feedback.
@@ -85,14 +93,19 @@ export function ToastProvider({ children }) {
       {children}
       {createPortal(
         <div
-          className="position-fixed p-3"
+          className="position-fixed p-3 d-flex flex-column gap-2"
           style={{
             // Logical properties, so the stack sits on the trailing edge in
             // both directions rather than always on the physical right.
             insetInlineEnd: 0,
-            insetBlockStart: 0,
+            // Below the header, not over it: the stack sits on the same corner
+            // as the account menu, and even empty its padding covered the top
+            // of that button — clicks there "sometimes" did nothing.
+            insetBlockStart: 'var(--ci-header-height, 64px)',
             zIndex: 1080,
-            maxWidth: 'min(420px, 92vw)',
+            width: 'min(380px, 92vw)',
+            // The stack itself never takes a click; only the toasts in it do.
+            pointerEvents: 'none',
           }}
           aria-live="polite"
           aria-atomic="false"
@@ -100,21 +113,34 @@ export function ToastProvider({ children }) {
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className={`toast show mb-2 text-bg-${toast.tone} border-0`}
+              className={`ci-toast ci-toast-${toast.tone}`}
+              style={{ pointerEvents: 'auto' }}
               role={toast.tone === 'danger' ? 'alert' : 'status'}
             >
-              <div className="d-flex">
-                <div className="toast-body">
-                  {toast.title && <strong className="d-block">{toast.title}</strong>}
-                  <span style={{ whiteSpace: 'pre-line' }}>{toast.message}</span>
-                </div>
-                <button
-                  type="button"
-                  className="btn-close btn-close-white m-2 m-auto"
-                  onClick={() => dismiss(toast.id)}
-                  aria-label="close"
-                />
+              <span className="ci-toast__icon" aria-hidden="true">
+                <i className={`bi bi-${TONE_ICON[toast.tone] ?? 'info-circle-fill'}`} />
+              </span>
+              <div className="ci-toast__text">
+                {toast.title && <strong className="ci-toast__title">{toast.title}</strong>}
+                <span className="ci-toast__message">{toast.message}</span>
               </div>
+              <button
+                type="button"
+                className="ci-toast__close"
+                onClick={() => dismiss(toast.id)}
+                aria-label={i18n.t('common.close', 'Close')}
+                title={i18n.t('common.close', 'Close')}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+              {/* How long until it closes itself. Errors stay, so no bar. */}
+              {toast.tone !== 'danger' && (
+                <span
+                  className="ci-toast__timer"
+                  style={{ animationDuration: `${toast.duration ?? 4000}ms` }}
+                  aria-hidden="true"
+                />
+              )}
             </div>
           ))}
         </div>,

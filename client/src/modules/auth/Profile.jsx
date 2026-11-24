@@ -223,7 +223,7 @@ export default function Profile() {
               )}
             </Dropdown>
           </div>
-          <div className="flex-grow-1 min-vw-0 pb-1">
+          <div className="profile-identity__text flex-grow-1 min-vw-0">
             <h1 className="h4 fw-bold mb-1 truncate">{displayName}</h1>
             <div className="d-flex flex-wrap align-items-center gap-2">
               {user?.role && (

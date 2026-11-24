@@ -7,11 +7,13 @@ import { localisedName } from '../../i18n';
 import { useAuth } from '../../app/AuthContext';
 import { P } from '../../utils/permissions';
 import { useProducts, useInvestigationTypes, useGovernorates } from '../../hooks/useCatalog';
+import { useClients } from '../../hooks/useClients';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import { PriorityBadge, SlaBadge, StatusBadge } from '../../components/Badges';
 import { useToast } from '../../components/Toast';
 import AssignModal from '../assignments/AssignModal';
+import MoveCaseButton from './MoveCaseButton';
 import CreateCaseModal from './CreateCaseModal';
 
 const STATUS_GROUPS = [
@@ -53,6 +55,7 @@ export default function InvestigationList() {
   const [searchDraft, setSearchDraft] = useState(params.get('search') ?? '');
 
   const { data: products } = useProducts();
+  const { data: clients } = useClients({ includeInactive: true });
   const { data: types } = useInvestigationTypes();
   const { data: governorates } = useGovernorates();
 
@@ -120,6 +123,12 @@ export default function InvestigationList() {
           {row.customer?.mobile && (
             <div className="small text-body-secondary mono">{row.customer.mobile}</div>
           )}
+          {row.clientAccount && (
+            <div className="small text-body-secondary truncate">
+              <i className="bi bi-buildings me-1" aria-hidden="true" />
+              {localisedName(row.clientAccount, i18n.language)}
+            </div>
+          )}
         </div>
       ),
     },
@@ -182,6 +191,11 @@ export default function InvestigationList() {
       header: t('cases.sla'),
       sortable: true,
       render: (row) => <SlaBadge sla={row.sla} />,
+    },
+    {
+      key: 'move',
+      header: '',
+      render: (row) => <MoveCaseButton caseId={row.id} />,
     },
   ];
 
@@ -284,6 +298,24 @@ export default function InvestigationList() {
                 ))}
               </select>
             </div>
+
+            {(clients ?? []).length > 0 && (
+              <div className="col-6 col-lg-2">
+                <select
+                  className="form-select form-select-sm"
+                  value={query.clientAccountId ?? ''}
+                  onChange={(event) => setFilter('clientAccountId', event.target.value)}
+                  aria-label={t('clients.client')}
+                >
+                  <option value="">{t('clients.filterAll')}</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {localisedName(client, i18n.language)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="col-6 col-lg-2">
               <select

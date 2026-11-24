@@ -20,6 +20,11 @@ import {
   AuthenticatedPrincipal,
   AuthenticatedUser,
 } from '../common/decorators/auth.decorators';
+import {
+  decodeUploadName,
+  isViewable,
+  safeFileName,
+} from '../common/utils/file-name.util';
 
 /** Content types accepted per media type, checked against the magic bytes too. */
 const ALLOWED_CONTENT_TYPES: Record<MediaType, string[]> = {
@@ -108,7 +113,7 @@ export class MediaService {
     const presigned = await this.storage.presignUpload({
       tenantId,
       prefix: 'media',
-      fileName: dto.fileName,
+      fileName: safeFileName(dto.fileName),
       contentType: dto.contentType,
       contentLength: dto.sizeBytes,
     });
@@ -122,7 +127,7 @@ export class MediaService {
         mediaType: dto.mediaType,
         status: MediaStatus.PENDING_UPLOAD,
         storageKey: presigned.key,
-        fileName: dto.fileName,
+        fileName: safeFileName(dto.fileName),
         mimeType: dto.contentType,
         sizeBytes: dto.sizeBytes,
         checksum: dto.checksum,
@@ -223,6 +228,8 @@ export class MediaService {
   ) {
     await this.assertCanAttach(tenantId, principal, dto.investigationId);
     this.assertContentType(dto.mediaType, file.mimetype);
+    // Multipart names arrive Latin-1-decoded; see file-name.util.ts.
+    const fileName = safeFileName(file.originalname);
 
     // `file.mimetype` is a client-supplied header. The bytes are the only
     // statement about what this actually is.
@@ -249,7 +256,7 @@ export class MediaService {
     const stored = await this.storage.putObject({
       tenantId,
       prefix: 'media',
-      fileName: file.originalname,
+      fileName: fileName,
       contentType: file.mimetype,
       body: file.buffer,
     });
@@ -267,7 +274,7 @@ export class MediaService {
         mediaType: dto.mediaType,
         status: MediaStatus.UPLOADED,
         storageKey: stored.key,
-        fileName: file.originalname,
+        fileName: fileName,
         mimeType: file.mimetype,
         sizeBytes: file.size,
         checksum,
@@ -293,7 +300,7 @@ export class MediaService {
       actorName: principal.fullName,
       entityType: 'MediaAsset',
       entityId: asset.id,
-      entityLabel: file.originalname,
+      entityLabel: fileName,
       metadata: {
         investigationId: dto.investigationId,
         mediaType: dto.mediaType,
@@ -359,6 +366,8 @@ export class MediaService {
     tenantId: string,
     principal: AuthenticatedPrincipal,
     assetId: string,
+    /** Viewing in place rather than downloading; honoured only for safe types. */
+    inline = false,
   ) {
     const asset = await this.prisma.mediaAsset.findFirst({
       where: { tenantId, id: assetId, deletedAt: null },
@@ -385,7 +394,7 @@ export class MediaService {
 
     await this.audit.log({
       tenantId,
-      action: 'FILE_DOWNLOADED',
+      action: inline ? 'FILE_VIEWED' : 'FILE_DOWNLOADED',
       category: 'MEDIA',
       actorType: principal.principalType,
       actorId: principal.id,
@@ -397,16 +406,27 @@ export class MediaService {
 
     if (!this.storage.supportsPresignedUploads) {
       // The local driver cannot sign; the controller streams instead.
-      return { url: null, streamThroughApi: true, expiresIn: 0 };
+      return {
+        url: null,
+        streamThroughApi: true,
+        expiresIn: 0,
+        mimeType: asset.mimeType,
+      };
     }
 
     const { url, expiresIn } = await this.storage.presignDownload(
       tenantId,
       asset.storageKey,
       asset.fileName,
+      inline && isViewable(asset.mimeType),
     );
 
-    return { url, streamThroughApi: false, expiresIn };
+    return {
+      url,
+      streamThroughApi: false,
+      expiresIn,
+      mimeType: asset.mimeType,
+    };
   }
 
   /** The bytes, for the streaming fallback. */
@@ -644,6 +664,10 @@ export class MediaService {
     const { storageKey: _storageKey, ...safe } = asset;
     return {
       ...safe,
+      // Names stored before the multipart fix are repaired on the way out.
+      ...(typeof safe.fileName === 'string'
+        ? { fileName: decodeUploadName(safe.fileName) }
+        : {}),
       captureLat: safe.captureLat ? Number(safe.captureLat) : null,
       captureLng: safe.captureLng ? Number(safe.captureLng) : null,
       captureAccuracy: safe.captureAccuracy

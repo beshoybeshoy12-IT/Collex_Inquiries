@@ -6,6 +6,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { contentDisposition } from '../../common/utils/file-name.util';
 import { StorageDriver } from '../storage.driver';
 
 export interface S3DriverConfig {
@@ -134,6 +135,7 @@ export class S3StorageDriver implements StorageDriver {
     key: string;
     expiresIn: number;
     downloadFileName?: string;
+    inline?: boolean;
   }): Promise<string> {
     return getSignedUrl(
       this.client,
@@ -145,18 +147,15 @@ export class S3StorageDriver implements StorageDriver {
               // Forces a download with the original name rather than the UUID
               // key, and — importantly — stops the browser rendering an
               // uploaded HTML or SVG file inline on the bucket's origin.
-              ResponseContentDisposition: `attachment; filename="${sanitiseFileName(
+              // RFC 5987, so an Arabic name arrives intact.
+              ResponseContentDisposition: contentDisposition(
                 input.downloadFileName,
-              )}"`,
+                input.inline ? 'inline' : 'attachment',
+              ),
             }
           : {}),
       }),
       { expiresIn: input.expiresIn },
     );
   }
-}
-
-/** Strip anything that would break out of the quoted header value. */
-function sanitiseFileName(name: string): string {
-  return name.replace(/["\\\r\n]/g, '').slice(0, 200) || 'download';
 }

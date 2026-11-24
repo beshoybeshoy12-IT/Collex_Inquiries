@@ -19,6 +19,7 @@ import {
   UpdateAvailabilityDto,
   UpdateInvestigatorDto,
   UpdateLocationDto,
+  ReportLocationsDto,
 } from './dto/investigator.dto';
 import {
   AllowPrincipals,
@@ -188,5 +189,21 @@ export class InvestigatorsController {
     @Body() dto: UpdateLocationDto,
   ) {
     return this.investigators.reportLocation(tenantId, investigator.id, dto);
+  }
+
+  /** The offline queue's flush: many fixes in one request. */
+  @Post('me/locations')
+  @AllowPrincipals(PrincipalType.INVESTIGATOR)
+  @ApiOperation({ summary: 'Report a queued batch of your own positions' })
+  reportLocations(
+    @TenantId() tenantId: string,
+    @CurrentUser() investigator: AuthenticatedInvestigator,
+    @Body() dto: ReportLocationsDto,
+  ) {
+    return this.investigators.reportLocations(
+      tenantId,
+      investigator.id,
+      dto.points,
+    );
   }
 }

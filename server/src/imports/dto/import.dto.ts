@@ -16,6 +16,7 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { ImportBatchStatus, ImportRowStatus, Priority } from '@prisma/client';
@@ -60,6 +61,15 @@ export class PrepareImportDto extends InspectImportDto {
   @IsOptional()
   @IsUUID()
   mappingTemplateId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'The client (bank/company) this file is from. Its template supplies the ' +
+      'mapping when none is sent, and every case created belongs to it.',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientAccountId?: string;
 
   @ApiPropertyOptional({ description: 'Used for rows with no product column.' })
   @IsOptional()
@@ -120,6 +130,11 @@ export class ImportBatchQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(ImportBatchStatus)
   status?: ImportBatchStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  clientAccountId?: string;
 }
 
 export class ImportRowQueryDto extends PaginationQueryDto {
@@ -183,3 +198,94 @@ export class CreateMappingTemplateDto {
 export class UpdateMappingTemplateDto extends PartialType(
   CreateMappingTemplateDto,
 ) {}
+
+export class FixCellDto {
+  @ApiProperty()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rowNumber: number;
+
+  @ApiProperty({ description: 'The column header, as in the file.' })
+  @IsString()
+  @MaxLength(200)
+  column: string;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(1000)
+  value: string;
+}
+
+export class FixReplaceDto {
+  @ApiProperty({ description: 'The column header, as in the file.' })
+  @IsString()
+  @MaxLength(200)
+  column: string;
+
+  @ApiProperty({
+    description: 'The cell text to find (trimmed, case-insensitive).',
+  })
+  @IsString()
+  @MaxLength(1000)
+  from: string;
+
+  @ApiProperty({ description: 'What to put instead — e.g. a product code.' })
+  @IsString()
+  @MaxLength(1000)
+  to: string;
+}
+
+/** Corrections to a staged batch, applied before it is confirmed. */
+export class FixImportDto {
+  @ApiPropertyOptional({ type: [FixCellDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5000)
+  @ValidateNested({ each: true })
+  @Type(() => FixCellDto)
+  cells?: FixCellDto[];
+
+  @ApiPropertyOptional({ type: [FixReplaceDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => FixReplaceDto)
+  replace?: FixReplaceDto[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Empty string clears it.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== '' && value !== null)
+  @IsUUID()
+  defaultProductId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Empty string clears it.',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== '' && value !== null)
+  @IsUUID()
+  defaultInvestigationTypeId?: string | null;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    description: 'Rows to leave out of this import (kept as SKIPPED).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5000)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  skipRows?: number[];
+
+  @ApiPropertyOptional({ description: 'Leave out every row that has errors.' })
+  @IsOptional()
+  @IsBoolean()
+  skipInvalid?: boolean;
+}

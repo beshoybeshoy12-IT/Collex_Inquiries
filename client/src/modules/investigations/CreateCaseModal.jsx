@@ -5,6 +5,7 @@ import api, { localiseServerMessage } from '../../services/api';
 import { localisedName } from '../../i18n';
 import Modal from '../../components/Modal';
 import { useToast } from '../../components/Toast';
+import { useClients } from '../../hooks/useClients';
 import {
   useCities,
   useGovernorates,
@@ -37,6 +38,7 @@ export default function CreateCaseModal({ open, onClose, onCreated }) {
   const [customerSearch, setCustomerSearch] = useState('');
 
   const { data: products } = useProducts();
+  const { data: clients } = useClients();
   const { data: allTypes } = useInvestigationTypes();
   const { data: governorates } = useGovernorates();
   const { data: cities } = useCities(form.governorateId);
@@ -49,10 +51,23 @@ export default function CreateCaseModal({ open, onClose, onCreated }) {
     }
   }, [open]);
 
-  // Only the types this product enables. The pairing rows are included on the
-  // product, so this needs no extra request.
+  // The chosen client's products and types; an empty list means all.
+  const chosenClient = (clients ?? []).find((client) => client.id === form.clientAccountId);
+  const clientProducts = useMemo(
+    () =>
+      chosenClient?.productIds?.length
+        ? (products ?? []).filter((product) => chosenClient.productIds.includes(product.id))
+        : products ?? [],
+    [chosenClient, products],
+  );
+
+  // Only the types this product enables (and the client has). The pairing rows
+  // are included on the product, so this needs no extra request.
   const availableTypes = useMemo(() => {
-    if (!form.productId || !products || !allTypes) return allTypes ?? [];
+    const clientTypes = chosenClient?.investigationTypeIds;
+    const forClient = (list) =>
+      clientTypes?.length ? list.filter((type) => clientTypes.includes(type.id)) : list;
+    if (!form.productId || !products || !allTypes) return forClient(allTypes ?? []);
 
     const product = products.find((candidate) => candidate.id === form.productId);
     const enabled = new Set(
@@ -61,8 +76,8 @@ export default function CreateCaseModal({ open, onClose, onCreated }) {
         .map((pairing) => pairing.investigationTypeId),
     );
 
-    return allTypes.filter((type) => enabled.has(type.id));
-  }, [form.productId, products, allTypes]);
+    return forClient(allTypes.filter((type) => enabled.has(type.id)));
+  }, [form.productId, products, allTypes, chosenClient]);
 
   // Clear a type that the newly-chosen product does not allow, rather than
   // submitting it and getting a 400.
@@ -104,6 +119,7 @@ export default function CreateCaseModal({ open, onClose, onCreated }) {
   const create = useMutation({
     mutationFn: async () => {
       const payload = {
+        clientAccountId: form.clientAccountId || undefined,
         productId: form.productId,
         investigationTypeId: form.investigationTypeId,
         priority: form.priority || undefined,
@@ -325,6 +341,35 @@ export default function CreateCaseModal({ open, onClose, onCreated }) {
       <hr />
 
       <div className="row g-2">
+        {(clients ?? []).length > 0 && (
+          <div className="col-12">
+            <label className="form-label small fw-semibold">{t('clients.client')}</label>
+            <select
+              className="form-select form-select-sm"
+              value={form.clientAccountId}
+              onChange={(event) => {
+                const chosen = clients.find((client) => client.id === event.target.value);
+                // A pick the client does not have is cleared; a client with a
+                // single product or type gets it filled in.
+                const fit = (picked, ids) =>
+                  !ids?.length ? picked : ids.length === 1 ? ids[0] : ids.includes(picked) ? picked : '';
+                setForm((current) => ({
+                  ...current,
+                  clientAccountId: event.target.value,
+                  productId: fit(current.productId, chosen?.productIds),
+                  investigationTypeId: fit(current.investigationTypeId, chosen?.investigationTypeIds),
+                }));
+              }}
+            >
+              <option value="">—</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {localisedName(client, i18n.language)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="col-12 col-md-6">
           <label className="form-label small fw-semibold">
             {t('cases.product')} <span className="text-danger">*</span>
@@ -335,7 +380,7 @@ export default function CreateCaseModal({ open, onClose, onCreated }) {
             onChange={set('productId')}
           >
             <option value="">—</option>
-            {(products ?? []).map((product) => (
+            {clientProducts.map((product) => (
               <option key={product.id} value={product.id}>
                 {localisedName(product, i18n.language)}
               </option>
@@ -463,6 +508,7 @@ function emptyForm() {
     nationalId: '',
     mobile: '',
     workplaceName: '',
+    clientAccountId: '',
     productId: '',
     investigationTypeId: '',
     priority: 'NORMAL',

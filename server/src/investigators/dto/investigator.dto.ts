@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsDateString,
   IsEmail,
@@ -17,6 +18,7 @@ import {
   IsUUID,
   Max,
   MaxLength,
+  ValidateNested,
   Min,
 } from 'class-validator';
 import { InvestigatorAvailability, InvestigatorStatus } from '@prisma/client';
@@ -241,4 +243,18 @@ export class UpdateLocationDto {
   @IsOptional()
   @IsEnum(InvestigatorAvailability)
   availability?: InvestigatorAvailability;
+}
+
+/**
+ * A queued batch of positions — what the app sends when signal comes back
+ * after a stretch without it. 500 is eight hours of one-minute fixes.
+ */
+export class ReportLocationsDto {
+  @ApiProperty({ type: [UpdateLocationDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => UpdateLocationDto)
+  points: UpdateLocationDto[];
 }

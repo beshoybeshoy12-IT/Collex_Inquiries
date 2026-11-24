@@ -4,8 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvestigatorStatus, Prisma } from '@prisma/client';
+import {
+  GpsEventType,
+  InvestigatorAvailability,
+  InvestigatorStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { AuditService } from '../audit/audit.service';
 import { PasswordService } from '../auth/password.service';
 import { AuthCacheService } from '../auth/auth-cache.service';
@@ -19,6 +25,12 @@ import {
   UpdateLocationDto,
 } from './dto/investigator.dto';
 import { AuthenticatedUser } from '../common/decorators/auth.decorators';
+
+/** Availabilities that mean "not working": no live tracking is stored. */
+const OFF_SHIFT: InvestigatorAvailability[] = [
+  InvestigatorAvailability.OFFLINE,
+  InvestigatorAvailability.ON_LEAVE,
+];
 
 /**
  * `passwordHash` is absent from every projection in this file. It is the one
@@ -74,6 +86,7 @@ export class InvestigatorsService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly authCache: AuthCacheService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -571,52 +584,130 @@ export class InvestigatorsService {
       where: { id: investigatorId },
       data: { availability: dto.availability, lastActivityAt: new Date() },
     });
-    void tenantId;
+    // Starting or ending a shift changes the live map; tell it to refetch.
+    this.realtime.emitToTenant(tenantId, 'investigator:location', {
+      investigatorId,
+    });
     return { availability: dto.availability };
   }
 
-  /**
-   * A position report from the handset.
-   *
-   * Writes the denormalised last-known position on the investigator and, when
-   * it belongs to a case, appends an immutable `GpsEvent`. The two are
-   * different things: one is "where are they now" for the map, the other is
-   * evidence.
-   */
+  /** One position report from the handset. See `reportLocations`. */
   async reportLocation(
     tenantId: string,
     investigatorId: string,
     dto: UpdateLocationDto,
   ) {
-    const now = new Date();
+    const result = await this.reportLocations(
+      tenantId,
+      investigatorId,
+      [dto],
+      dto.availability,
+    );
+    return { ...result, recorded: result.recorded > 0 };
+  }
 
+  /**
+   * Position reports from the handset — live tracking, one or a queued batch.
+   *
+   * ONLY WHILE ON SHIFT. Tracking is what the investigator switched on by
+   * starting work; an investigator whose availability is OFFLINE or ON_LEAVE
+   * is not tracked, and points that arrive anyway are dropped, not stored. The
+   * app therefore flushes its offline queue BEFORE it reports going offline.
+   *
+   * Each point becomes an immutable `LOCATION_UPDATE` (pruned by the retention
+   * sweep), and the newest one moves the investigator's last-known position —
+   * forward only, so a late flush never drags the map pin back in time.
+   *
+   * A case id that is not one of this investigator's own cases is dropped from
+   * the point rather than trusted: a fix cannot be attached to a colleague's
+   * case.
+   *
+   * The socket gets a signal with the investigator id only — never the
+   * coordinates. The map refetches over REST, behind `view_location`.
+   */
+  async reportLocations(
+    tenantId: string,
+    investigatorId: string,
+    points: UpdateLocationDto[],
+    availability?: InvestigatorAvailability,
+  ): Promise<{ recorded: number; dropped: number; reason?: string }> {
+    const investigator = await this.prisma.investigator.findFirst({
+      where: { tenantId, id: investigatorId, deletedAt: null },
+      select: { availability: true },
+    });
+    if (!investigator) {
+      throw new NotFoundException('الباحث غير موجود - Investigator not found');
+    }
+
+    const effective = availability ?? investigator.availability;
+    if (OFF_SHIFT.includes(effective)) {
+      if (availability && availability !== investigator.availability) {
+        await this.setOwnAvailability(tenantId, investigatorId, {
+          availability,
+        });
+      }
+      return { recorded: 0, dropped: points.length, reason: 'OFF_SHIFT' };
+    }
+
+    const now = new Date();
+    const caseIds = [
+      ...new Set(points.map((p) => p.investigationId).filter(Boolean)),
+    ] as string[];
+    const ownCases = caseIds.length
+      ? new Set(
+          (
+            await this.prisma.investigation.findMany({
+              where: { tenantId, investigatorId, id: { in: caseIds } },
+              select: { id: true },
+            })
+          ).map((row) => row.id),
+        )
+      : new Set<string>();
+
+    const rows = points.map((point) => ({
+      tenantId,
+      investigatorId,
+      investigationId:
+        point.investigationId && ownCases.has(point.investigationId)
+          ? point.investigationId
+          : null,
+      eventType: GpsEventType.LOCATION_UPDATE,
+      lat: point.lat,
+      lng: point.lng,
+      accuracyM: point.accuracyM,
+      speedMps: point.speedMps,
+      headingDeg: point.headingDeg,
+      recordedAt: point.recordedAt ? new Date(point.recordedAt) : now,
+    }));
+
+    await this.prisma.gpsEvent.createMany({ data: rows });
+
+    // The newest point, by the device's clock — but never later than now: a
+    // handset whose clock runs ahead would otherwise pin the map for hours.
+    const latest = rows.reduce((a, b) => (b.recordedAt > a.recordedAt ? b : a));
+    const at = latest.recordedAt > now ? now : latest.recordedAt;
+
+    await this.prisma.investigator.updateMany({
+      where: {
+        tenantId,
+        id: investigatorId,
+        OR: [{ lastLocationAt: null }, { lastLocationAt: { lt: at } }],
+      },
+      data: { lastLat: latest.lat, lastLng: latest.lng, lastLocationAt: at },
+    });
     await this.prisma.investigator.update({
       where: { id: investigatorId },
       data: {
-        lastLat: dto.lat,
-        lastLng: dto.lng,
-        lastLocationAt: now,
         lastActivityAt: now,
-        ...(dto.availability ? { availability: dto.availability } : {}),
+        ...(availability ? { availability } : {}),
       },
     });
 
-    await this.prisma.gpsEvent.create({
-      data: {
-        tenantId,
-        investigatorId,
-        investigationId: dto.investigationId ?? null,
-        eventType: 'LOCATION_UPDATE',
-        lat: dto.lat,
-        lng: dto.lng,
-        accuracyM: dto.accuracyM,
-        speedMps: dto.speedMps,
-        headingDeg: dto.headingDeg,
-        recordedAt: dto.recordedAt ? new Date(dto.recordedAt) : now,
-      },
+    this.realtime.emitToTenant(tenantId, 'investigator:location', {
+      investigatorId,
     });
 
-    return { recorded: true };
+    return { recorded: rows.length, dropped: 0 };
   }
 
   async remove(tenantId: string, id: string) {

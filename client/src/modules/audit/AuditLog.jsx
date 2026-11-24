@@ -5,6 +5,12 @@ import api from '../../services/api';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import Modal from '../../components/Modal';
+import {
+  actionLabel,
+  fieldLabel,
+  severityLabel,
+  valueLabel,
+} from '../../utils/auditLabels';
 
 const CATEGORIES = [
   'AUTH',
@@ -67,7 +73,9 @@ export default function AuditLog() {
       header: t('audit.action'),
       render: (row) => (
         <span>
-          <span className="mono small">{row.action}</span>
+          <span className="fw-medium" title={row.action}>
+            {actionLabel(row.action, t, i18n)}
+          </span>
           {row.severity !== 'INFO' && (
             <span
               className={`badge ms-2 text-bg-${
@@ -78,7 +86,7 @@ export default function AuditLog() {
                     : 'info'
               }`}
             >
-              {row.severity}
+              {severityLabel(row.severity, t, i18n)}
             </span>
           )}
         </span>
@@ -210,7 +218,7 @@ export default function AuditLog() {
         open={Boolean(detail)}
         onClose={() => setDetail(null)}
         size="modal-lg"
-        title={detail?.action}
+        title={detail ? actionLabel(detail.action, t, i18n) : ''}
       >
         {detail && (
           <>
@@ -258,11 +266,15 @@ export default function AuditLog() {
                   <tbody>
                     {Object.entries(detail.newValue).map(([key, value]) => (
                       <tr key={key}>
-                        <td className="text-body-secondary">{key}</td>
-                        <td className="text-body-tertiary">
-                          {stringify(detail.oldValue?.[key])}
+                        <td className="text-body-secondary" title={key}>
+                          {fieldLabel(key, t, i18n)}
                         </td>
-                        <td className="fw-medium">{stringify(value)}</td>
+                        <td className="text-body-tertiary">
+                          {valueLabel(key, detail.oldValue?.[key], t, i18n) ?? stringify(detail.oldValue?.[key])}
+                        </td>
+                        <td className="fw-medium">
+                          {valueLabel(key, value, t, i18n) ?? stringify(value)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

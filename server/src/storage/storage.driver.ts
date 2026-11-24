@@ -44,5 +44,7 @@ export interface StorageDriver {
     key: string;
     expiresIn: number;
     downloadFileName?: string;
+    /** Show in place instead of downloading. Callers allow it only for viewable types. */
+    inline?: boolean;
   }): Promise<string>;
 }

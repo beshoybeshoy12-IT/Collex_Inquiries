@@ -13,6 +13,8 @@ import Logo, { Wordmark } from '../components/Logo';
 import ThemeToggle from '../components/ThemeToggle';
 import UserAvatar from '../components/UserAvatar';
 import { useProfileImages } from '../hooks/useProfileImages';
+import { useActivityHeartbeat } from '../hooks/useActivityHeartbeat';
+import ChatDock from '../modules/chat/ChatDock';
 
 /**
  * Whether a navigation entry describes the page currently on screen.
@@ -86,6 +88,7 @@ function initialsOf(name) {
 export default function AppLayout() {
   const { t, i18n } = useTranslation();
   const { user, signOut, can } = useAuth();
+  useActivityHeartbeat();
   const location = useLocation();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -351,6 +354,7 @@ export default function AppLayout() {
         <main className="app-main flex-grow-1 min-vw-0">
           <Outlet />
         </main>
+        <ChatDock />
       </div>
     </div>
   );

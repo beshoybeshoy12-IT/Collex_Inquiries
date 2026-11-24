@@ -7,6 +7,7 @@ import { localisedName } from '../../i18n';
 import ErrorState from '../../components/ErrorState';
 import InquirySheet from './InquirySheet';
 import { sheetHeader } from './sheetHeader';
+import { useCaseClient } from '../../hooks/useClients';
 
 /**
  * The printable inquiry sheet, on a page of its own.
@@ -61,7 +62,10 @@ export function PrintCaseSheet() {
     investigation.error ||
     form.error ||
     (otherFormId && otherForm.data === null ? t('inquirySheet.notPublished') : null);
-  const ready = investigation.data && form.data;
+  // Printing starts on its own once the sheet is ready, so "ready" includes
+  // the client's logo — otherwise the first page comes out without it.
+  const caseClient = useCaseClient(investigation.data);
+  const ready = investigation.data && form.data && caseClient.ready;
 
   return (
     <PrintFrame
@@ -79,6 +83,7 @@ export function PrintCaseSheet() {
           schema={form.data.schema}
           answers={form.data.submission?.answers ?? {}}
           blank={blank}
+          brand={caseClient}
         />
       )}
     </PrintFrame>

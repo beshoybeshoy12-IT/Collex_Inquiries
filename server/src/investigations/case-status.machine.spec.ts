@@ -4,6 +4,7 @@ import {
   assertTransition,
   findTransition,
   IllegalTransitionError,
+  overrideTransition,
   OPEN_FOR_INVESTIGATOR,
   STATUS_GROUPS,
   TERMINAL_STATUSES,
@@ -135,18 +136,33 @@ describe('case status machine', () => {
       // so the office may submit from wherever the field work stands. But
       // "submitted" must mean there are answers: from the status bar (no
       // viaForm) it stays refused, exactly as the test above requires.
-      for (const from of [S.ASSIGNED, S.ACCEPTED, S.EN_ROUTE, S.ON_SITE, S.IN_PROGRESS, S.REWORK]) {
-        expect(() => assertTransition(from, S.SUBMITTED, WEB)).toThrow(IllegalTransitionError);
+      for (const from of [
+        S.ASSIGNED,
+        S.ACCEPTED,
+        S.EN_ROUTE,
+        S.ON_SITE,
+        S.IN_PROGRESS,
+        S.REWORK,
+      ]) {
+        expect(() => assertTransition(from, S.SUBMITTED, WEB)).toThrow(
+          IllegalTransitionError,
+        );
         expect(() =>
-          assertTransition(from, S.SUBMITTED, WEB, undefined, { viaForm: true }),
+          assertTransition(from, S.SUBMITTED, WEB, undefined, {
+            viaForm: true,
+          }),
         ).not.toThrow();
       }
       // The investigator's own submit is unaffected.
-      expect(() => assertTransition(S.IN_PROGRESS, S.SUBMITTED, FIELD)).not.toThrow();
+      expect(() =>
+        assertTransition(S.IN_PROGRESS, S.SUBMITTED, FIELD),
+      ).not.toThrow();
     });
 
     it('never offers a form-only move on the status bar', () => {
-      expect(allowedNextStatuses(S.IN_PROGRESS, WEB)).not.toContain(S.SUBMITTED);
+      expect(allowedNextStatuses(S.IN_PROGRESS, WEB)).not.toContain(
+        S.SUBMITTED,
+      );
       expect(allowedNextStatuses(S.ASSIGNED, WEB)).not.toContain(S.SUBMITTED);
       expect(allowedNextStatuses(S.IN_PROGRESS, FIELD)).toContain(S.SUBMITTED);
     });
@@ -489,5 +505,53 @@ describe('SLA and TAT', () => {
     ])('formats %p as %p', (minutes, expected) => {
       expect(formatDuration(minutes)).toBe(expected);
     });
+  });
+});
+
+describe('overrideTransition — the exceptional move', () => {
+  const S = InvestigationStatus;
+
+  it('may skip steps the machine would require', () => {
+    // NEW straight to COMPLETED is illegal normally; an override allows it.
+    const rule = overrideTransition(S.NEW, S.COMPLETED, {
+      hasInvestigator: true,
+      reason: 'Closed by phone with the bank',
+    });
+    expect(rule.to).toBe(S.COMPLETED);
+  });
+
+  it('stamps what the normal route into that status stamps', () => {
+    const rule = overrideTransition(S.READY_FOR_ASSIGNMENT, S.ACCEPTED, {
+      hasInvestigator: true,
+      reason: 'Accepted by phone',
+    });
+    expect(rule.stamps).toBe('acceptedAt');
+  });
+
+  it('refuses without a real reason', () => {
+    expect(() =>
+      overrideTransition(S.NEW, S.CANCELLED, {
+        hasInvestigator: false,
+        reason: ' ok ',
+      }),
+    ).toThrow(IllegalTransitionError);
+  });
+
+  it('refuses a field status with nobody to do the visit', () => {
+    expect(() =>
+      overrideTransition(S.READY_FOR_ASSIGNMENT, S.IN_PROGRESS, {
+        hasInvestigator: false,
+        reason: 'Moving it along',
+      }),
+    ).toThrow(IllegalTransitionError);
+  });
+
+  it('refuses a move to the status it is already in', () => {
+    expect(() =>
+      overrideTransition(S.QC_PENDING, S.QC_PENDING, {
+        hasInvestigator: true,
+        reason: 'No change at all',
+      }),
+    ).toThrow(IllegalTransitionError);
   });
 });

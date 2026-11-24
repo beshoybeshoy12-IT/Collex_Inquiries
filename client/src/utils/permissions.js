@@ -24,6 +24,7 @@ export const P = {
   INVESTIGATIONS_EXPORT: 'investigations.export',
   INVESTIGATIONS_ARCHIVE: 'investigations.archive',
   INVESTIGATIONS_COMMENT: 'investigations.comment',
+  INVESTIGATIONS_OVERRIDE_STATUS: 'investigations.override_status',
 
   CUSTOMERS_VIEW: 'customers.view',
   CUSTOMERS_CREATE: 'customers.create',
@@ -109,4 +110,7 @@ export const P = {
 
   NOTIFICATIONS_VIEW: 'notifications.view',
   NOTIFICATIONS_BROADCAST: 'notifications.broadcast',
+
+  ATTENDANCE_VIEW_ALL: 'attendance.view_all',
+  ANNOUNCEMENTS_MANAGE: 'announcements.manage',
 };

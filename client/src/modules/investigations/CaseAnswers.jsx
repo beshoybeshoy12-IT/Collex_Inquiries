@@ -13,6 +13,7 @@ import { useToast } from '../../components/Toast';
 import Modal from '../../components/Modal';
 import InquirySheet from '../forms/InquirySheet';
 import { sheetHeader } from '../forms/sheetHeader';
+import { useCaseClient } from '../../hooks/useClients';
 
 /**
  * When the office may type in a paper form. Mirrors `OFFICE_ENTRY_STATUSES`
@@ -70,6 +71,7 @@ function openPrint(investigationId, { blank = false, formId } = {}) {
  */
 export default function CaseAnswers({ investigationId, investigation }) {
   const { t, i18n } = useTranslation();
+  const caseClient = useCaseClient(investigation);
   const { can } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -442,6 +444,7 @@ export default function CaseAnswers({ investigationId, investigation }) {
             title={localisedName(data, i18n.language)}
             header={sheetHeader(t, investigation)}
             schema={data.schema}
+            brand={caseClient}
             answers={draft}
             onChange={(key, value) => {
               setDraft((current) => ({ ...current, [key]: value }));

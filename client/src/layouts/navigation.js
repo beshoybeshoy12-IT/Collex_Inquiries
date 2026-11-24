@@ -18,12 +18,31 @@ import { P } from '../utils/permissions';
  */
 export const NAVIGATION = [
   {
-    key: 'dashboard',
+    key: 'home',
     to: '/',
+    icon: 'house-door',
+    labelKey: 'nav.home',
+    permissions: [],
+    end: true,
+  },
+  {
+    key: 'dashboard',
+    to: '/dashboard',
     icon: 'speedometer2',
     labelKey: 'nav.dashboard',
     permissions: [P.DASHBOARD_VIEW],
     end: true,
+  },
+
+  // The banks and companies. Uploading happens inside a client now — its
+  // template is the mapping — so the separate Import entry is gone; the upload
+  // history is a link on the clients page.
+  {
+    key: 'clients',
+    to: '/clients',
+    icon: 'buildings',
+    labelKey: 'nav.clients',
+    permissions: [P.CLIENTS_VIEW],
   },
 
   {
@@ -153,30 +172,6 @@ export const NAVIGATION = [
         to: '/investigators/map',
         labelKey: 'nav.liveMap',
         permissions: [P.INVESTIGATORS_VIEW_LOCATION],
-      },
-    ],
-  },
-
-  {
-    key: 'imports',
-    labelKey: 'nav.imports',
-    icon: 'file-earmark-spreadsheet',
-    permissions: [P.IMPORTS_VIEW],
-    children: [
-      {
-        key: 'import-new',
-        icon: 'cloud-arrow-up',
-        to: '/imports/new',
-        labelKey: 'nav.excelImport',
-        permissions: [P.IMPORTS_CREATE],
-      },
-      {
-        key: 'import-history',
-        icon: 'clock-history',
-        to: '/imports',
-        labelKey: 'nav.importHistory',
-        permissions: [P.IMPORTS_VIEW],
-        end: true,
       },
     ],
   },
@@ -335,7 +330,9 @@ export function visibleNavigation(can, { isSuperAdmin = false } = {}) {
     if (item.superAdminOnly && !isSuperAdmin) return null;
 
     if (!item.children) {
-      return can(...item.permissions) ? item : null;
+      // An empty list means "every signed-in user" — can() with nothing to
+      // check answers false, which would hide the home page from everyone.
+      return item.permissions.length === 0 || can(...item.permissions) ? item : null;
     }
 
     // A section that is already established as the operator's keeps all its

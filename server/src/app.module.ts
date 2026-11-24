@@ -20,6 +20,10 @@ import { RolesModule } from './roles/roles.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { UsersModule } from './users/users.module';
 import { InvestigatorsModule } from './investigators/investigators.module';
+import { AttendanceModule } from './attendance/attendance.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
+import { ClientsModule } from './clients/clients.module';
+import { ChatModule } from './chat/chat.module';
 import { CustomersModule } from './customers/customers.module';
 import { InvestigationsModule } from './investigations/investigations.module';
 import { ProductsModule } from './products/products.module';
@@ -131,6 +135,10 @@ import { env, isProduction } from './common/config/env';
     QcModule,
     MediaModule,
     ProfileModule,
+    AttendanceModule,
+    AnnouncementsModule,
+    ClientsModule,
+    ChatModule,
     GpsModule,
     ReportsModule,
     AnalyticsModule,

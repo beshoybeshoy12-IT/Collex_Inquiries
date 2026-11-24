@@ -1,16 +1,14 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import api, { localiseServerMessage } from '../../services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '../../services/api';
 import { localisedName } from '../../i18n';
 import { useAuth } from '../../app/AuthContext';
 import { P } from '../../utils/permissions';
 import PageHeader, { Field, Panel } from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import EmptyState from '../../components/EmptyState';
-import Modal from '../../components/Modal';
-import { useToast } from '../../components/Toast';
 import {
   PriorityBadge,
   SlaBadge,
@@ -18,11 +16,14 @@ import {
   StatusBadge,
 } from '../../components/Badges';
 import AssignModal from '../assignments/AssignModal';
+import ClientLogo from '../clients/ClientLogo';
+import { useCaseClient } from '../../hooks/useClients';
 import CaseTimeline from './CaseTimeline';
 import CaseEvidence from './CaseEvidence';
 import CaseGps from './CaseGps';
 import CaseAnswers from './CaseAnswers';
 import CaseReports from './CaseReports';
+import MoveCaseButton from './MoveCaseButton';
 import CaseAudit from './CaseAudit';
 
 const TABS = [
@@ -56,35 +57,17 @@ export default function InvestigationDetail() {
   const { id } = useParams();
   const { t, i18n } = useTranslation();
   const { can } = useAuth();
-  const toast = useToast();
   const queryClient = useQueryClient();
 
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? 'overview';
 
-  const [transitionTo, setTransitionTo] = useState(null);
-  const [reason, setReason] = useState('');
   const [reassigning, setReassigning] = useState(false);
   const [assigning, setAssigning] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['investigation', id],
     queryFn: async () => (await api.get(`/investigations/${id}`)).data,
-  });
-
-  const transition = useMutation({
-    mutationFn: async ({ status, reason: why }) =>
-      (await api.post(`/investigations/${id}/transition`, { status, reason: why })).data,
-    onSuccess: () => {
-      toast.success(t('common.saved'));
-      setTransitionTo(null);
-      setReason('');
-      queryClient.invalidateQueries({ queryKey: ['investigation', id] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-timeline', id] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-counts'] });
-    },
-    onError: (mutationError) =>
-      toast.error(localiseServerMessage(mutationError.friendlyMessage)),
   });
 
   if (isLoading) {
@@ -103,11 +86,6 @@ export default function InvestigationDetail() {
     updated.set('tab', next);
     setParams(updated, { replace: true });
   };
-
-  // A cancellation always needs a reason; the server enforces it, and asking
-  // here avoids a round trip that only produces an error message.
-  const needsReason = (status) =>
-    ['CANCELLED', 'REWORK', 'QC_REJECTED', 'READY_FOR_ASSIGNMENT'].includes(status);
 
   return (
     <>
@@ -158,26 +136,7 @@ export default function InvestigationDetail() {
               </button>
             )}
 
-            {data.allowedTransitions?.length > 0 && (
-              <div className="btn-group btn-group-sm">
-                {data.allowedTransitions.map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    className={`btn btn-outline-${
-                      status === 'CANCELLED' ? 'danger' : 'secondary'
-                    }`}
-                    onClick={() => {
-                      if (needsReason(status)) setTransitionTo(status);
-                      else transition.mutate({ status });
-                    }}
-                    disabled={transition.isPending}
-                  >
-                    {t(`status.${status}`, status)}
-                  </button>
-                ))}
-              </div>
-            )}
+            <MoveCaseButton caseId={id} variant="primary" />
           </>
         }
       />
@@ -206,50 +165,6 @@ export default function InvestigationDetail() {
       {tab === 'report' && <CaseReports investigation={data} />}
       {tab === 'audit' && <CaseAudit investigationId={id} />}
 
-      {/* ── Transition with a reason ─────────────────────────────────────── */}
-      <Modal
-        open={Boolean(transitionTo)}
-        onClose={() => {
-          setTransitionTo(null);
-          setReason('');
-        }}
-        title={`${t('cases.moveTo')} ${t(`status.${transitionTo}`, transitionTo ?? '')}`}
-        busy={transition.isPending}
-        footer={
-          <>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => setTransitionTo(null)}
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              className={`btn btn-${transitionTo === 'CANCELLED' ? 'danger' : 'primary'}`}
-              onClick={() => transition.mutate({ status: transitionTo, reason })}
-              disabled={reason.trim().length === 0 || transition.isPending}
-            >
-              {t('common.confirm')}
-            </button>
-          </>
-        }
-      >
-        <label className="form-label small fw-semibold" htmlFor="transition-reason">
-          {t('cases.transitionReason')} <span className="text-danger">*</span>
-        </label>
-        <textarea
-          id="transition-reason"
-          className="form-control"
-          rows={3}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
-        {reason.trim().length === 0 && (
-          <div className="form-text text-danger small">{t('cases.reasonRequired')}</div>
-        )}
-      </Modal>
-
       <AssignModal
         open={assigning}
         onClose={() => setAssigning(false)}
@@ -276,6 +191,31 @@ function Overview({ investigation, language }) {
       <div className="col-12 col-lg-8">
         <Panel title={t('cases.tabs.overview')} className="mb-3">
           <div className="row">
+            {investigation.clientAccount && (
+              <div className="col-12 mb-2">
+                <CaseClient investigation={investigation} language={language} />
+              </div>
+            )}
+            {investigation.additionalData?.extraFields?.length > 0 && (
+              <div className="col-12 mb-2">
+                <details className="case-extra">
+                  <summary>
+                    <i className="bi bi-file-earmark-spreadsheet me-1" aria-hidden="true" />
+                    {t('cases.extraFields', {
+                      count: investigation.additionalData.extraFields.length,
+                    })}
+                  </summary>
+                  <dl className="case-client__fields">
+                    {investigation.additionalData.extraFields.map((field) => (
+                      <div key={field.key}>
+                        <dt>{field.label}</dt>
+                        <dd dir="auto">{field.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              </div>
+            )}
             <div className="col-6 col-md-4">
               <Field label={t('cases.product')}>
                 {localisedName(investigation.product, language)}
@@ -524,5 +464,37 @@ function QcTab({ investigation }) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The bank or company the case is for, with its logo, and the client's own
+ * fields from its file ("Loan amount", "Branch") as they were imported.
+ */
+function CaseClient({ investigation, language }) {
+  const { t } = useTranslation();
+  const { client } = useCaseClient(investigation);
+  const extra = investigation.additionalData?.clientFields ?? [];
+
+  return (
+    <div className="case-client">
+      <Link to={`/clients/${investigation.clientAccount.id}`} className="case-client__head">
+        <ClientLogo client={client} size={36} />
+        <span>
+          <span className="small text-body-secondary d-block">{t('clients.client')}</span>
+          <span className="fw-semibold">{localisedName(investigation.clientAccount, language)}</span>
+        </span>
+      </Link>
+      {extra.length > 0 && (
+        <dl className="case-client__fields">
+          {extra.map((field) => (
+            <div key={field.key}>
+              <dt>{field.label}</dt>
+              <dd dir="auto">{field.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   );
 }

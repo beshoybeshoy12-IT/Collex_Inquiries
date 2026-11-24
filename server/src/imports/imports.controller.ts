@@ -24,6 +24,7 @@ import { MappingTemplatesService } from './mapping-templates.service';
 import {
   ConfirmImportDto,
   CreateMappingTemplateDto,
+  FixImportDto,
   ImportBatchQueryDto,
   ImportRowQueryDto,
   InspectImportDto,
@@ -90,14 +91,11 @@ export class ImportsController {
       })),
     );
 
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="collex-import-template.xlsx"',
-    );
+    // Opaque bytes and no file name: a desktop download manager would grab an
+    // xlsx attachment and leave the page an empty reply. The client names it.
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(buffer);
   }
 
@@ -181,15 +179,27 @@ export class ImportsController {
     @Res() res: Response,
   ) {
     const report = await this.imports.errorReport(tenantId, id);
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${report.fileName}"`,
-    );
+    // Opaque bytes and no file name: a desktop download manager would grab an
+    // xlsx attachment and leave the page an empty reply. The client names it.
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(report.buffer);
+  }
+
+  @Post(':id/fix')
+  @RequirePermission(P.IMPORTS_CREATE)
+  @ApiOperation({
+    summary:
+      'Correct staged rows (cells, value replacements, defaults) and re-check',
+  })
+  fix(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: FixImportDto,
+  ) {
+    return this.imports.fix(tenantId, user, id, dto);
   }
 
   // ── 4. Resolve duplicates, then confirm ─────────────────────────────────

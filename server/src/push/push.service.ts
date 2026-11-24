@@ -5,6 +5,7 @@ import { RequestContextService } from '../common/context/request-context';
 import { env } from '../common/config/env';
 import { PushDriver, PushMessage, PushResult } from './push.driver';
 import { LogPushDriver } from './drivers/log.driver';
+import { FcmPushDriver } from './drivers/fcm.driver';
 import { RegisterDeviceDto } from './dto/device.dto';
 
 /**
@@ -42,9 +43,12 @@ export class PushService implements OnModuleInit {
   ) {
     const name = env('PUSH_DRIVER', 'none').toLowerCase();
 
-    // One driver today. The branch exists so adding FCM is a case, not a
-    // rewrite of everything that calls this.
+    // FCM is called directly — no Expo push service in between. `fcm` with
+    // missing credentials throws here, so a misconfigured deploy fails at boot.
     switch (name) {
+      case 'fcm':
+        this.driver = new FcmPushDriver();
+        break;
       default:
         this.driver = new LogPushDriver();
     }

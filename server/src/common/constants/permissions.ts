@@ -35,6 +35,11 @@ export const P = {
   INVESTIGATIONS_EXPORT: 'investigations.export',
   INVESTIGATIONS_ARCHIVE: 'investigations.archive',
   INVESTIGATIONS_COMMENT: 'investigations.comment',
+  /**
+   * Move a case to ANY status, outside the state machine, with a written
+   * reason. For correcting mistakes; every use is a WARNING in the audit log.
+   */
+  INVESTIGATIONS_OVERRIDE_STATUS: 'investigations.override_status',
 
   // ─── Customers ────────────────────────────────────────────────────────────
   CUSTOMERS_VIEW: 'customers.view',
@@ -137,13 +142,19 @@ export const P = {
   SETTINGS_MANAGE: 'settings.manage',
   TENANT_MANAGE: 'tenant.manage',
 
-  // ─── Client accounts (portal groundwork) ──────────────────────────────────
+  // ─── Clients ("الجهات"): the banks and companies, their logo and template ──
   CLIENTS_VIEW: 'clients.view',
   CLIENTS_MANAGE: 'clients.manage',
 
   // ─── Notifications ────────────────────────────────────────────────────────
   NOTIFICATIONS_VIEW: 'notifications.view',
   NOTIFICATIONS_BROADCAST: 'notifications.broadcast',
+
+  // ─── Office attendance and announcements ──────────────────────────────────
+  /** Everyone records their own attendance; this sees everybody's. */
+  ATTENDANCE_VIEW_ALL: 'attendance.view_all',
+  /** Publish, edit and remove announcements, and see who has read them. */
+  ANNOUNCEMENTS_MANAGE: 'announcements.manage',
 } as const;
 
 export type PermissionCode = (typeof P)[keyof typeof P];
@@ -250,6 +261,12 @@ const RAW: Omit<PermissionDefinition, 'sortOrder'>[] = [
     'investigations',
     'إضافة ملاحظات',
     'Comment on investigations',
+  ),
+  D(
+    P.INVESTIGATIONS_OVERRIDE_STATUS,
+    'investigations',
+    'نقل استثنائي لحالة التحقيق',
+    'Override case status',
   ),
 
   // customers
@@ -426,12 +443,12 @@ const RAW: Omit<PermissionDefinition, 'sortOrder'>[] = [
   ),
 
   // clients
-  D(P.CLIENTS_VIEW, 'clients', 'عرض العملاء المؤسسيين', 'View client accounts'),
+  D(P.CLIENTS_VIEW, 'clients', 'عرض الجهات', 'View clients'),
   D(
     P.CLIENTS_MANAGE,
     'clients',
-    'إدارة العملاء المؤسسيين',
-    'Manage client accounts',
+    'إدارة الجهات وقوالبها',
+    'Manage clients and their templates',
   ),
 
   // notifications
@@ -446,6 +463,20 @@ const RAW: Omit<PermissionDefinition, 'sortOrder'>[] = [
     'notifications',
     'إرسال إشعار عام',
     'Broadcast notification',
+  ),
+
+  // attendance and announcements
+  D(
+    P.ATTENDANCE_VIEW_ALL,
+    'attendance',
+    'عرض حضور الموظفين',
+    'View staff attendance',
+  ),
+  D(
+    P.ANNOUNCEMENTS_MANAGE,
+    'announcements',
+    'إدارة الإعلانات',
+    'Manage announcements',
   ),
 ];
 

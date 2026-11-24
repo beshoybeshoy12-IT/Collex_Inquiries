@@ -34,12 +34,22 @@ import {
   CellProblem,
 } from './utils/row-validator';
 import { comparablePhone } from '../common/utils/phone.util';
+import { decodeUploadName, safeFileName } from '../common/utils/file-name.util';
 import {
   ConfirmImportDto,
+  FixImportDto,
   PrepareImportDto,
   ResolveDuplicatesDto,
 } from './dto/import.dto';
 import { AuthenticatedUser } from '../common/decorators/auth.decorators';
+import {
+  customFieldsFrom,
+  extraColumns,
+  mappingFrom,
+  readClientFields,
+  readTemplate,
+  TemplateField,
+} from '../clients/clients.util';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -131,13 +141,21 @@ export class ImportsService {
     file: { buffer: Buffer; originalname: string; size: number },
     dto: PrepareImportDto,
   ) {
-    const mapping = await this.resolveMapping(tenantId, dto);
+    // Multipart decodes the name as Latin-1; an Arabic name arrives garbled
+    // ("ÙØ©Ù.xlsx") unless it is decoded back from UTF-8.
+    const fileName = safeFileName(file.originalname);
+    const client = dto.clientAccountId
+      ? await this.loadClient(tenantId, dto.clientAccountId)
+      : null;
+    const clientFields = client ? readTemplate(client.templateFields) : [];
+    const mapping = await this.resolveMapping(tenantId, dto, clientFields);
+    const customFields = customFieldsFrom(clientFields);
     const sheet = parseSheet(file.buffer, {
       sheetName: dto.sheetName,
       headerRow: dto.headerRow,
     });
 
-    if (Object.keys(mapping).length === 0) {
+    if (Object.keys(mapping).length === 0 && customFields.length === 0) {
       throw new BadRequestException(
         'لم يتم ربط أي عمود - No columns have been mapped to system fields',
       );
@@ -151,7 +169,7 @@ export class ImportsService {
       .putObject({
         tenantId,
         prefix: 'imports',
-        fileName: file.originalname,
+        fileName,
         contentType:
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         body: file.buffer,
@@ -165,9 +183,34 @@ export class ImportsService {
 
     const reference = await this.nextReference(tenantId);
 
+    // A client limited to one product (or type) has, in effect, a default.
+    const only = (ids?: string[]) => (ids?.length === 1 ? ids[0] : undefined);
+    const allowed = {
+      productIds: client?.productIds?.length
+        ? new Set(client.productIds)
+        : null,
+      investigationTypeIds: client?.investigationTypeIds?.length
+        ? new Set(client.investigationTypeIds)
+        : null,
+    };
+    if (
+      (dto.defaultProductId &&
+        allowed.productIds &&
+        !allowed.productIds.has(dto.defaultProductId)) ||
+      (dto.defaultInvestigationTypeId &&
+        allowed.investigationTypeIds &&
+        !allowed.investigationTypeIds.has(dto.defaultInvestigationTypeId))
+    ) {
+      throw new BadRequestException(
+        'المنتج أو نوع الاستعلام غير متاح لهذه الجهة - ' +
+          'That product or inquiry type is not enabled for this client',
+      );
+    }
+
     const defaults = {
-      productId: dto.defaultProductId,
-      investigationTypeId: dto.defaultInvestigationTypeId,
+      productId: dto.defaultProductId ?? only(client?.productIds),
+      investigationTypeId:
+        dto.defaultInvestigationTypeId ?? only(client?.investigationTypeIds),
       priority: dto.defaultPriority,
       dueAt: dto.defaultDueAt ? new Date(dto.defaultDueAt) : undefined,
     };
@@ -176,12 +219,13 @@ export class ImportsService {
       data: {
         tenantId,
         reference,
-        fileName: file.originalname,
+        fileName,
         storageKey: stored?.key,
         fileSize: file.size,
         sheetName: sheet.sheetName,
         status: ImportBatchStatus.PARSING,
         mappingTemplateId: dto.mappingTemplateId,
+        clientAccountId: client?.id,
         mappingUsed: mapping,
         defaultProductId: defaults.productId,
         defaultInvestigationTypeId: defaults.investigationTypeId,
@@ -196,6 +240,10 @@ export class ImportsService {
       mapping,
       lookups,
       defaults,
+      customFields,
+      extraFields: extraColumns(sheet.headers, mapping, customFields),
+      clientAccountId: client?.id,
+      allowed,
     });
 
     const updated = await this.prisma.importBatch.update({
@@ -219,7 +267,7 @@ export class ImportsService {
       entityId: batch.id,
       entityLabel: reference,
       newValue: {
-        fileName: file.originalname,
+        fileName,
         totalRows: staged.total,
         validRows: staged.valid,
         invalidRows: staged.invalid,
@@ -242,74 +290,30 @@ export class ImportsService {
     tenantId: string,
     batchId: string,
     rows: Record<string, unknown>[],
-    context: {
-      mapping: Record<string, string>;
-      lookups: LookupTables;
-      defaults: {
-        productId?: string;
-        investigationTypeId?: string;
-        priority?: Priority;
-        dueAt?: Date;
-      };
-    },
+    context: StageContext,
   ) {
-    const staged: Prisma.ImportRowCreateManyInput[] = [];
-    const errorCounts = new Map<string, number>();
+    const readColumns = columnsRead(context);
+    const live = rows
+      .map((raw, index) => ({ rowNumber: index + 1, raw }))
+      .filter((row) => !isBlankRow(row.raw, readColumns));
 
-    const validated = rows.map((raw, index) => {
-      const rowNumber = index + 1;
-      if (isBlankRow(raw, context.mapping)) return null;
+    const evaluated = await this.evaluateRows(tenantId, live, context);
 
-      const result = validateRow(raw, context);
-      for (const error of result.errors) {
-        const key = `${error.column}::${error.reasonEn}`;
-        errorCounts.set(key, (errorCounts.get(key) ?? 0) + 1);
-      }
-      return { rowNumber, raw, result };
-    });
-
-    const live = validated.filter(
-      (entry): entry is NonNullable<typeof entry> => entry !== null,
-    );
-
-    const duplicates = await this.detectDuplicates(tenantId, live);
-
-    let valid = 0;
-    let invalid = 0;
-    let duplicateCount = 0;
-
-    for (const entry of live) {
-      const rowDuplicates = duplicates.get(entry.rowNumber) ?? [];
-      const isDuplicate = rowDuplicates.length > 0;
-
-      let status: ImportRowStatus;
-      if (!entry.result.valid) {
-        status = ImportRowStatus.INVALID;
-        invalid++;
-      } else if (isDuplicate) {
-        status = ImportRowStatus.DUPLICATE;
-        duplicateCount++;
-      } else {
-        status = ImportRowStatus.VALID;
-        valid++;
-      }
-
-      staged.push({
+    const staged: Prisma.ImportRowCreateManyInput[] = evaluated.entries.map(
+      (entry) => ({
         tenantId,
         batchId,
         rowNumber: entry.rowNumber,
-        status,
+        status: entry.status,
         rawData: entry.raw as never,
-        mappedData: entry.result.value as never,
-        errors: entry.result.errors.length
-          ? (entry.result.errors as never)
+        mappedData: entry.value as never,
+        errors: entry.errors.length ? (entry.errors as never) : undefined,
+        warnings: entry.warnings.length ? (entry.warnings as never) : undefined,
+        duplicateOf: entry.duplicateOf.length
+          ? (entry.duplicateOf as never)
           : undefined,
-        warnings: entry.result.warnings.length
-          ? (entry.result.warnings as never)
-          : undefined,
-        duplicateOf: isDuplicate ? rowDuplicates : undefined,
-      });
-    }
+      }),
+    );
 
     // Chunked because a single createMany with 50,000 rows exceeds Postgres's
     // parameter limit.
@@ -319,8 +323,129 @@ export class ImportsService {
       });
     }
 
+    return {
+      total: live.length,
+      valid: evaluated.valid,
+      invalid: evaluated.invalid,
+      duplicates: evaluated.duplicates,
+      summary: {
+        totalRows: live.length,
+        validRows: evaluated.valid,
+        invalidRows: evaluated.invalid,
+        duplicateRows: evaluated.duplicates,
+        blankRowsSkipped: rows.length - live.length,
+        extraColumns: (context.extraFields ?? []).map((field) => field.header),
+        topErrors: evaluated.topErrors,
+        unknownValues: evaluated.unknownValues,
+        missingDefaults: evaluated.missingDefaults,
+      },
+    };
+  }
+
+  /** Validate rows and find duplicates, without writing anything. */
+  private async evaluateRows(
+    tenantId: string,
+    rows: { rowNumber: number; raw: Record<string, unknown> }[],
+    context: StageContext,
+  ) {
+    const customFields = context.customFields ?? [];
+    const errorCounts = new Map<string, number>();
+    // What the fix panel offers: values the catalogue does not know, grouped,
+    // and rows with no product / type at all (fixed by a batch default).
+    const unknown = new Map<
+      string,
+      { field: string; column: string; value: string; count: number }
+    >();
+    const missing = { product: 0, investigationType: 0 };
+
+    const validated = rows.map(({ rowNumber, raw }) => {
+      const result = validateRow(raw, context);
+      const outside = outsideClient(
+        result.value,
+        context.allowed,
+        context.mapping,
+      );
+      if (outside.length > 0) {
+        result.errors.push(...outside);
+        result.valid = false;
+      }
+      if (customFields.length > 0) {
+        const extra = readClientFields(raw, customFields);
+        if (extra.values.length > 0) result.value.clientFields = extra.values;
+        if (extra.errors.length > 0) {
+          result.errors.push(...extra.errors);
+          result.valid = false;
+        }
+      }
+      if (context.extraFields?.length) {
+        const kept = readClientFields(raw, context.extraFields).values;
+        if (kept.length > 0) result.value.extraFields = kept;
+      }
+      for (const error of result.errors) {
+        const key = `${error.column}::${error.reasonEn}`;
+        errorCounts.set(key, (errorCounts.get(key) ?? 0) + 1);
+      }
+      for (const field of ['product', 'investigationType'] as const) {
+        if (result.value[`${field}Id`]) continue;
+        const column = context.mapping[field];
+        const cell = column ? raw[column] : undefined;
+        const text =
+          typeof cell === 'string' || typeof cell === 'number'
+            ? String(cell).trim()
+            : '';
+        if (!text) {
+          missing[field]++;
+          continue;
+        }
+        const key = `${field}::${text.toLowerCase()}`;
+        const entry = unknown.get(key) ?? {
+          field,
+          column: column,
+          value: text,
+          count: 0,
+        };
+        entry.count++;
+        unknown.set(key, entry);
+      }
+      return { rowNumber, raw, result };
+    });
+
+    const duplicates = await this.detectDuplicates(
+      tenantId,
+      validated,
+      context.clientAccountId,
+    );
+
+    let valid = 0;
+    let invalid = 0;
+    let duplicateCount = 0;
+
+    const entries = validated.map((entry) => {
+      const rowDuplicates = duplicates.get(entry.rowNumber) ?? [];
+      let status: ImportRowStatus;
+      if (!entry.result.valid) {
+        status = ImportRowStatus.INVALID;
+        invalid++;
+      } else if (rowDuplicates.length > 0) {
+        status = ImportRowStatus.DUPLICATE;
+        duplicateCount++;
+      } else {
+        status = ImportRowStatus.VALID;
+        valid++;
+      }
+      return {
+        rowNumber: entry.rowNumber,
+        raw: entry.raw,
+        status,
+        value: entry.result.value,
+        errors: entry.result.errors,
+        warnings: entry.result.warnings,
+        duplicateOf: rowDuplicates,
+      };
+    });
+
     const topErrors = [...errorCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
+      .sort((x, y) => y[1] - x[1])
       .slice(0, 20)
       .map(([key, count]) => {
         const [column, reason] = key.split('::');
@@ -328,19 +453,331 @@ export class ImportsService {
       });
 
     return {
-      total: live.length,
+      entries,
       valid,
       invalid,
       duplicates: duplicateCount,
-      summary: {
-        totalRows: live.length,
-        validRows: valid,
-        invalidRows: invalid,
-        duplicateRows: duplicateCount,
-        blankRowsSkipped: rows.length - live.length,
-        topErrors,
+      topErrors,
+      unknownValues: [...unknown.values()].sort((x, y) => y.count - x.count),
+      missingDefaults: missing,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  2b. Fix before confirming
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Correct a staged batch in place, then check it again.
+   *
+   * The file is the user's, and a bank's file is often 99% right: a product
+   * spelled the bank's way, a missing default, one mistyped national id.
+   * Sending the user back to Excel for that loses the afternoon. Three kinds of
+   * fix, all applied to the staged copy only — nothing operational is written
+   * until confirmation, as before:
+   *
+   *   - cells:   one cell of one row, typed in.
+   *   - replace: every cell in a column holding one value gets another —
+   *              "قرض سلع معمرة" → the product's code, for all rows at once.
+   *   - defaults: the product / type for rows with no value at all.
+   */
+  async fix(
+    tenantId: string,
+    user: AuthenticatedUser,
+    batchId: string,
+    dto: FixImportDto,
+  ) {
+    const batch = await this.getBatch(tenantId, batchId);
+    if (batch.status !== ImportBatchStatus.PREVIEW_READY) {
+      throw new BadRequestException(
+        'لا يمكن تعديل دفعة بعد تأكيدها - A batch can be fixed only before it is confirmed',
+      );
+    }
+
+    // Defaults first: they decide how every row reads.
+    const defaults: Prisma.ImportBatchUpdateInput = {};
+    if (dto.defaultProductId !== undefined) {
+      if (dto.defaultProductId) {
+        await this.assertUsable(tenantId, batch.clientAccountId, {
+          productId: dto.defaultProductId,
+        });
+      }
+      defaults.defaultProductId = dto.defaultProductId || null;
+    }
+    if (dto.defaultInvestigationTypeId !== undefined) {
+      if (dto.defaultInvestigationTypeId) {
+        await this.assertUsable(tenantId, batch.clientAccountId, {
+          investigationTypeId: dto.defaultInvestigationTypeId,
+        });
+      }
+      defaults.defaultInvestigationTypeId =
+        dto.defaultInvestigationTypeId || null;
+    }
+    if (Object.keys(defaults).length > 0) {
+      await this.prisma.importBatch.update({
+        where: { id: batchId },
+        data: defaults,
+      });
+    }
+
+    // Dropped rows leave the run but stay staged, marked SKIPPED — the record
+    // of what the file held and what the user chose not to import.
+    let skipped = 0;
+    if (dto.skipRows?.length || dto.skipInvalid) {
+      const result = await this.prisma.importRow.updateMany({
+        where: {
+          tenantId,
+          batchId,
+          status: dto.skipInvalid
+            ? ImportRowStatus.INVALID
+            : { in: [...OPEN_ROW_STATUSES] },
+          ...(dto.skipInvalid ? {} : { rowNumber: { in: dto.skipRows } }),
+        },
+        data: { status: ImportRowStatus.SKIPPED, resolution: 'SKIP' },
+      });
+      skipped = result.count;
+    }
+
+    const rows = await this.prisma.importRow.findMany({
+      where: {
+        tenantId,
+        batchId,
+        status: { in: [...OPEN_ROW_STATUSES] },
+      },
+      select: { id: true, rowNumber: true, rawData: true, resolution: true },
+    });
+
+    const cellsByRow = new Map<number, { column: string; value: string }[]>();
+    for (const cell of dto.cells ?? []) {
+      const list = cellsByRow.get(cell.rowNumber) ?? [];
+      list.push(cell);
+      cellsByRow.set(cell.rowNumber, list);
+    }
+
+    let changedCells = 0;
+    const edited = rows.map((row) => {
+      const raw = { ...((row.rawData ?? {}) as Record<string, unknown>) };
+      for (const rule of dto.replace ?? []) {
+        if (sameCell(raw[rule.column], rule.from)) {
+          raw[rule.column] = rule.to;
+          changedCells++;
+        }
+      }
+      for (const cell of cellsByRow.get(row.rowNumber) ?? []) {
+        raw[cell.column] = cell.value;
+        changedCells++;
+      }
+      return { ...row, raw };
+    });
+
+    const updated = await this.revalidate(tenantId, batchId, edited);
+
+    await this.audit.log({
+      tenantId,
+      action: 'IMPORT_FIXED',
+      category: 'IMPORT',
+      actorType: user.principalType,
+      actorId: user.id,
+      actorName: user.fullName,
+      entityType: 'ImportBatch',
+      entityId: batchId,
+      entityLabel: batch.reference,
+      newValue: {
+        changedCells,
+        skipped,
+        replaced: (dto.replace ?? []).map(
+          (rule) => `${rule.column}: ${rule.from} → ${rule.to}`,
+        ),
+        ...(Object.keys(defaults).length ? { defaults } : {}),
+      },
+    });
+
+    return updated;
+  }
+
+  /** Check the batch's open rows again, with their (possibly edited) cells. */
+  private async revalidate(
+    tenantId: string,
+    batchId: string,
+    rows: {
+      id: string;
+      rowNumber: number;
+      raw: Record<string, unknown>;
+      resolution?: string | null;
+    }[],
+  ) {
+    const batch = await this.getBatch(tenantId, batchId);
+    const headers = [...new Set(rows.flatMap((row) => Object.keys(row.raw)))];
+    const context = await this.contextFor(tenantId, {
+      clientAccountId: batch.clientAccountId,
+      mapping: (batch.mappingUsed ?? {}) as Record<string, string>,
+      defaults: {
+        productId: batch.defaultProductId ?? undefined,
+        investigationTypeId: batch.defaultInvestigationTypeId ?? undefined,
+        priority: batch.defaultPriority ?? undefined,
+        dueAt: batch.defaultDueAt ?? undefined,
+      },
+      headers,
+    });
+
+    const evaluated = await this.evaluateRows(tenantId, rows, context);
+    const ids = new Map(rows.map((row) => [row.rowNumber, row.id]));
+
+    // A duplicate the user already accepted ("not a problem") stays accepted:
+    // re-checking after an unrelated fix must not flag it all over again.
+    const accepted = new Set(
+      rows
+        .filter((row) => row.resolution === 'CREATE_ANYWAY')
+        .map((row) => row.rowNumber),
+    );
+    for (const entry of evaluated.entries) {
+      if (
+        entry.status === ImportRowStatus.DUPLICATE &&
+        accepted.has(entry.rowNumber)
+      ) {
+        entry.status = ImportRowStatus.VALID;
+        evaluated.duplicates--;
+        evaluated.valid++;
+      }
+    }
+
+    for (let i = 0; i < evaluated.entries.length; i += 200) {
+      const chunk = evaluated.entries.slice(i, i + 200);
+      await this.prisma.$transaction(
+        chunk.map((entry) =>
+          this.prisma.importRow.update({
+            where: { id: ids.get(entry.rowNumber)! },
+            data: {
+              status: entry.status,
+              rawData: entry.raw as never,
+              mappedData: entry.value as never,
+              errors: entry.errors.length
+                ? (entry.errors as never)
+                : Prisma.DbNull,
+              warnings: entry.warnings.length
+                ? (entry.warnings as never)
+                : Prisma.DbNull,
+              duplicateOf: entry.duplicateOf.length
+                ? (entry.duplicateOf as never)
+                : Prisma.DbNull,
+            },
+          }),
+        ),
+      );
+    }
+
+    const previous = (batch.errorSummary ?? {}) as Record<string, unknown>;
+    const result = await this.prisma.importBatch.update({
+      where: { id: batchId },
+      data: {
+        validRows: evaluated.valid,
+        invalidRows: evaluated.invalid,
+        duplicateRows: evaluated.duplicates,
+        errorSummary: {
+          ...previous,
+          validRows: evaluated.valid,
+          invalidRows: evaluated.invalid,
+          duplicateRows: evaluated.duplicates,
+          topErrors: evaluated.topErrors,
+          unknownValues: evaluated.unknownValues,
+          missingDefaults: evaluated.missingDefaults,
+        } as never,
+      },
+      include: {
+        uploadedBy: { select: { id: true, fullName: true } },
+        clientAccount: { select: { id: true, nameAr: true, nameEn: true } },
+      },
+    });
+    return result;
+  }
+
+  /**
+   * Everything validation needs, rebuilt from a staged batch: its mapping and
+   * defaults, the catalogue lookups, and its client's template and limits.
+   */
+  private async contextFor(
+    tenantId: string,
+    input: {
+      clientAccountId: string | null;
+      mapping: Record<string, string>;
+      defaults: StageContext['defaults'];
+      headers: string[];
+    },
+  ): Promise<StageContext> {
+    const client = input.clientAccountId
+      ? await this.prisma.clientAccount.findFirst({
+          where: { tenantId, id: input.clientAccountId },
+          select: {
+            id: true,
+            templateFields: true,
+            productIds: true,
+            investigationTypeIds: true,
+          },
+        })
+      : null;
+    const customFields = client
+      ? customFieldsFrom(readTemplate(client.templateFields))
+      : [];
+    return {
+      mapping: input.mapping,
+      lookups: await this.buildLookups(tenantId),
+      defaults: input.defaults,
+      customFields,
+      extraFields: extraColumns(input.headers, input.mapping, customFields),
+      clientAccountId: client?.id,
+      allowed: {
+        productIds: client?.productIds?.length
+          ? new Set(client.productIds)
+          : null,
+        investigationTypeIds: client?.investigationTypeIds?.length
+          ? new Set(client.investigationTypeIds)
+          : null,
       },
     };
+  }
+
+  /** A product / type of this tenant, active, and one the client has. */
+  private async assertUsable(
+    tenantId: string,
+    clientAccountId: string | null,
+    pick: { productId?: string; investigationTypeId?: string },
+  ) {
+    const client = clientAccountId
+      ? await this.prisma.clientAccount.findFirst({
+          where: { tenantId, id: clientAccountId },
+          select: { productIds: true, investigationTypeIds: true },
+        })
+      : null;
+    if (pick.productId) {
+      const found = await this.prisma.product.findFirst({
+        where: { tenantId, id: pick.productId, isActive: true },
+        select: { id: true },
+      });
+      if (
+        !found ||
+        (client?.productIds.length &&
+          !client.productIds.includes(pick.productId))
+      ) {
+        throw new BadRequestException(
+          'المنتج غير متاح - That product is not available',
+        );
+      }
+    }
+    if (pick.investigationTypeId) {
+      const found = await this.prisma.investigationType.findFirst({
+        where: { tenantId, id: pick.investigationTypeId, isActive: true },
+        select: { id: true },
+      });
+      if (
+        !found ||
+        (client?.investigationTypeIds.length &&
+          !client.investigationTypeIds.includes(pick.investigationTypeId))
+      ) {
+        throw new BadRequestException(
+          'نوع الاستعلام غير متاح - That inquiry type is not available',
+        );
+      }
+    }
   }
 
   /**
@@ -354,6 +791,7 @@ export class ImportsService {
   private async detectDuplicates(
     tenantId: string,
     rows: { rowNumber: number; result: { value: Record<string, unknown> } }[],
+    clientAccountId?: string,
   ): Promise<
     Map<
       number,
@@ -424,6 +862,10 @@ export class ImportsService {
           tenantId,
           deletedAt: null,
           applicationNumber: { in: [...applications.keys()] },
+          // An application number is the client's own reference: two banks
+          // can each have an application 1001. Within one client it repeats
+          // only when the same application is sent twice.
+          ...(clientAccountId ? { clientAccountId } : {}),
         },
         select: { id: true, applicationNumber: true, caseNumber: true },
       });
@@ -633,6 +1075,16 @@ export class ImportsService {
                   coordinatorId: user.id,
                   createdById: user.id,
                   importBatchId: batchId,
+                  clientAccountId: batch.clientAccountId,
+                  // The client's own columns and any column nothing read,
+                  // each kept as labelled text.
+                  additionalData:
+                    data.clientFields || data.extraFields
+                      ? ({
+                          clientFields: data.clientFields,
+                          extraFields: data.extraFields,
+                        } as never)
+                      : undefined,
                   slaPolicyId: policy?.id,
                   dueAt:
                     (data.dueDate as Date | undefined) ??
@@ -876,11 +1328,17 @@ export class ImportsService {
 
   async listBatches(
     tenantId: string,
-    query: PaginationQueryDto & { status?: ImportBatchStatus },
+    query: PaginationQueryDto & {
+      status?: ImportBatchStatus;
+      clientAccountId?: string;
+    },
   ) {
     const where: Prisma.ImportBatchWhereInput = {
       tenantId,
       ...(query.status ? { status: query.status } : {}),
+      ...(query.clientAccountId
+        ? { clientAccountId: query.clientAccountId }
+        : {}),
       ...(query.search
         ? {
             OR: [
@@ -897,6 +1355,7 @@ export class ImportsService {
         include: {
           uploadedBy: { select: { id: true, fullName: true } },
           mappingTemplate: { select: { id: true, code: true, nameEn: true } },
+          clientAccount: { select: { id: true, nameAr: true, nameEn: true } },
         },
         orderBy: query.orderBy(['uploadedAt', 'reference'], 'uploadedAt'),
         skip: query.skip,
@@ -905,7 +1364,13 @@ export class ImportsService {
       this.prisma.importBatch.count({ where }),
     ]);
 
-    return paginate(rows, total, query.page, query.limit);
+    // Batches uploaded before the name was decoded are repaired on the way out.
+    return paginate(
+      rows.map((row) => ({ ...row, fileName: decodeUploadName(row.fileName) })),
+      total,
+      query.page,
+      query.limit,
+    );
   }
 
   async getBatch(tenantId: string, batchId: string) {
@@ -914,12 +1379,13 @@ export class ImportsService {
       include: {
         uploadedBy: { select: { id: true, fullName: true } },
         mappingTemplate: true,
+        clientAccount: { select: { id: true, nameAr: true, nameEn: true } },
       },
     });
     if (!batch) {
       throw new NotFoundException('الدفعة غير موجودة - Import batch not found');
     }
-    return batch;
+    return { ...batch, fileName: decodeUploadName(batch.fileName) };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -929,8 +1395,13 @@ export class ImportsService {
   private async resolveMapping(
     tenantId: string,
     dto: PrepareImportDto,
+    clientFields: TemplateField[] = [],
   ): Promise<Record<string, string>> {
     if (dto.mapping && Object.keys(dto.mapping).length > 0) return dto.mapping;
+
+    // A client's template is a mapping in itself: its columns already say
+    // which system field each one feeds.
+    if (clientFields.length > 0) return mappingFrom(clientFields);
 
     if (dto.mappingTemplateId) {
       const template = await this.prisma.importMappingTemplate.findFirst({
@@ -949,6 +1420,23 @@ export class ImportsService {
       'يجب تحديد ربط الأعمدة أو قالب ربط - ' +
         'Provide either a column mapping or a mapping template',
     );
+  }
+
+  /** An active client of this tenant, or 404. */
+  private async loadClient(tenantId: string, id: string) {
+    const client = await this.prisma.clientAccount.findFirst({
+      where: { tenantId, id, isActive: true },
+      select: {
+        id: true,
+        templateFields: true,
+        productIds: true,
+        investigationTypeIds: true,
+      },
+    });
+    if (!client) {
+      throw new NotFoundException('الجهة غير موجودة - Client not found');
+    }
+    return client;
   }
 
   /**
@@ -1040,4 +1528,95 @@ export class ImportsService {
 
     return `${prefix}${String(sequence).padStart(3, '0')}`;
   }
+}
+
+/**
+ * A row whose product or inquiry type the client does not have. Reported on
+ * the cell, like any other problem, so the preview shows which rows and why.
+ */
+export function outsideClient(
+  value: Record<string, unknown>,
+  allowed:
+    | {
+        productIds: Set<string> | null;
+        investigationTypeIds: Set<string> | null;
+      }
+    | undefined,
+  mapping: Record<string, string>,
+): CellProblem[] {
+  const problems: CellProblem[] = [];
+  if (!allowed) return problems;
+  const productId = value.productId as string | undefined;
+  if (productId && allowed.productIds && !allowed.productIds.has(productId)) {
+    problems.push({
+      field: 'product',
+      column: mapping.product ?? 'product',
+      reasonAr: 'المنتج غير متاح لهذه الجهة',
+      reasonEn: 'This product is not enabled for this client',
+    });
+  }
+  const typeId = value.investigationTypeId as string | undefined;
+  if (
+    typeId &&
+    allowed.investigationTypeIds &&
+    !allowed.investigationTypeIds.has(typeId)
+  ) {
+    problems.push({
+      field: 'investigationType',
+      column: mapping.investigationType ?? 'investigationType',
+      reasonAr: 'نوع الاستعلام غير متاح لهذه الجهة',
+      reasonEn: 'This inquiry type is not enabled for this client',
+    });
+  }
+  return problems;
+}
+
+/** What validating a batch's rows needs. */
+interface StageContext {
+  mapping: Record<string, string>;
+  lookups: LookupTables;
+  defaults: {
+    productId?: string;
+    investigationTypeId?: string;
+    priority?: Priority;
+    dueAt?: Date;
+  };
+  /** The client's own columns, carried onto the case as labelled text. */
+  customFields?: TemplateField[];
+  /** Columns nothing reads; kept on the case as extra information. */
+  extraFields?: TemplateField[];
+  clientAccountId?: string;
+  /** The client's allowed products / types; null means all. */
+  allowed?: {
+    productIds: Set<string> | null;
+    investigationTypeIds: Set<string> | null;
+  };
+}
+
+/** Rows still waiting for confirmation — the ones a fix may touch. */
+const OPEN_ROW_STATUSES = [
+  ImportRowStatus.VALID,
+  ImportRowStatus.INVALID,
+  ImportRowStatus.DUPLICATE,
+] as const;
+
+/** Every column a row is read from, mapped or client-only. */
+function columnsRead(context: StageContext): Record<string, string> {
+  return {
+    ...context.mapping,
+    ...Object.fromEntries(
+      (context.customFields ?? []).map((field) => [
+        `client:${field.key}`,
+        field.header,
+      ]),
+    ),
+  };
+}
+
+/** A cell equals a value as the user sees it: trimmed, spaces collapsed. */
+export function sameCell(cell: unknown, value: string): boolean {
+  if (cell === null || cell === undefined) return value.trim() === '';
+  if (typeof cell !== 'string' && typeof cell !== 'number') return false;
+  const norm = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+  return norm(String(cell)) === norm(value);
 }

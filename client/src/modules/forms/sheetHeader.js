@@ -23,5 +23,11 @@ export function sheetHeader(t, investigation) {
     { label: t('inquirySheet.applicationNumber'), value: investigation?.applicationNumber },
     { label: t('inquirySheet.bankAddress'), value: investigation?.addressLine },
     { label: t('inquirySheet.investigator'), value: investigation?.investigator?.fullName },
+    // The client's own columns from its file ("Loan amount", "Branch"), as
+    // they were when the case was imported.
+    ...(investigation?.additionalData?.clientFields ?? []).map((field) => ({
+      label: field.label,
+      value: field.value,
+    })),
   ];
 }

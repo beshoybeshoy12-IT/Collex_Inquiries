@@ -19,3 +19,7 @@ client/dist/
 # A throwaway local PostgreSQL cluster (see docs/local-database.md).
 # Never committed: it holds a real data directory.
 .devdb/
+
+# Firebase service-account credentials (FCM push). Never commit these.
+*service-account*.json
+*firebase-adminsdk*.json

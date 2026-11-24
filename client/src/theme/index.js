@@ -52,7 +52,7 @@ function apply() {
   document.documentElement.setAttribute('data-bs-theme', theme);
   // The browser chrome on phones follows the page.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0b1120' : '#f4f6fb');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0a0a0b' : '#f4f6fb');
   listeners.forEach((listener) => listener());
 }
 

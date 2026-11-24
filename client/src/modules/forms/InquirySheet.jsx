@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { localisedLabel } from '../../i18n';
+import { localisedLabel, localisedName } from '../../i18n';
 import { conditionsMet } from '../../utils/formConditions';
 
 /**
@@ -33,6 +33,8 @@ import { conditionsMet } from '../../utils/formConditions';
  * @param {Record<string, unknown>} [props.answers]
  * @param {(key: string, value: unknown) => void} [props.onChange]  Omit for a read-only sheet.
  * @param {boolean} [props.blank]
+ * @param {{ client: object|null, logoUrl?: string|null }} [props.brand]
+ *   The bank or company the inquiry is for: its logo and name head the sheet.
  */
 export default function InquirySheet({
   title,
@@ -41,6 +43,7 @@ export default function InquirySheet({
   answers = {},
   onChange,
   blank = false,
+  brand = null,
 }) {
   const { t, i18n } = useTranslation();
   const language = i18n.language;
@@ -51,6 +54,17 @@ export default function InquirySheet({
 
   return (
     <div className="ci-sheet">
+      {brand?.client && (
+        <div className="ci-sheet-brand">
+          {brand.logoUrl ? (
+            <img className="ci-sheet-brand__logo" src={brand.logoUrl} alt="" />
+          ) : null}
+          <div className="ci-sheet-brand__name">
+            <span className="ci-sheet-label">{t('inquirySheet.forClient')}:</span>{' '}
+            <strong>{localisedName(brand.client, language)}</strong>
+          </div>
+        </div>
+      )}
       <h2 className="ci-sheet-title">{title}</h2>
 
       <div className="ci-sheet-grid ci-sheet-header">

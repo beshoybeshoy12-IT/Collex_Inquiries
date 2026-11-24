@@ -32,8 +32,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
   // Backs the GIN trigram indexes on customer name / mobile / national id and
   // on case and application numbers — see the `@@index(... gin_trgm_ops)`
   // declarations on `Customer` and `Investigation`.
@@ -110,6 +110,13 @@ model Tenant {
   assignments        Assignment[]
   clients            ClientAccount[]
   deviceTokens       DeviceToken[]
+  attendanceSessions AttendanceSession[]
+  announcements      Announcement[]
+  announcementReads  AnnouncementRead[]
+  chatConversations  ChatConversation[]
+  chatParticipants   ChatParticipant[]
+  chatMessages       ChatMessage[]
+  chatAttachments    ChatAttachment[]
 
   @@index([status])
   @@map("tenants")
@@ -201,6 +208,9 @@ model User {
   reports             Report[]
   clientAccount       ClientAccount?
   deviceTokens        DeviceToken[]
+  attendanceSessions  AttendanceSession[]
+  announcements       Announcement[]           @relation("AnnouncementAuthor")
+  announcementReads   AnnouncementRead[]
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -298,7 +308,7 @@ model Investigator {
   /// person, and it only updates at login — a provider token that rotates
   /// mid-session leaves this pointing at a handset that stopped listening,
   /// which fails silently. `DeviceToken` is authoritative.
-  pushToken      String?
+  pushToken String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -712,7 +722,7 @@ model EscalationRule {
   trigger EscalationTrigger
 
   /// Minutes after the triggering moment before this rule fires.
-  thresholdMinutes Int
+  thresholdMinutes   Int
   /// Fired at most once per case per rule unless this is set.
   repeatEveryMinutes Int?
 
@@ -739,7 +749,7 @@ model EscalationRule {
 /// a non-repeating rule fire once: the sweep inserts and lets the database
 /// reject the duplicate rather than reading first and racing itself.
 model EscalationEvent {
-  id     String @id @default(uuid())
+  id     String         @id @default(uuid())
   ruleId String
   rule   EscalationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
@@ -769,12 +779,12 @@ model Customer {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  fullName   String
-  nationalId String?
-  mobile     String?
-  altMobile  String?
-  homePhone  String?
-  email      String?
+  fullName    String
+  nationalId  String?
+  mobile      String?
+  altMobile   String?
+  homePhone   String?
+  email       String?
   dateOfBirth DateTime?
 
   /// Residence
@@ -902,9 +912,9 @@ model Investigation {
   investigationTypeId String
   investigationType   InvestigationType @relation(fields: [investigationTypeId], references: [id], onDelete: Restrict)
 
-  status   InvestigationStatus @default(NEW)
-  priority Priority            @default(NORMAL)
-  source   InvestigationSource @default(MANUAL)
+  status   InvestigationStatus  @default(NEW)
+  priority Priority             @default(NORMAL)
+  source   InvestigationSource  @default(MANUAL)
   result   InvestigationResult?
 
   /// Where the visit happens. Copied from the customer at creation but editable
@@ -940,6 +950,11 @@ model Investigation {
   importBatchId String?
   importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
 
+  /// The bank or company this inquiry is for. Set by an import into that
+  /// client, or chosen when the case is created by hand.
+  clientAccountId String?
+  clientAccount   ClientAccount? @relation(fields: [clientAccountId], references: [id], onDelete: SetNull)
+
   /// Lifecycle stamps. Every one of these is written by the status machine, and
   /// the TAT report is computed from them rather than from a stored duration.
   assignedAt  DateTime?
@@ -956,8 +971,8 @@ model Investigation {
   /// rework list sorts on it.
   reworkCount Int @default(0)
 
-  cancelReason String?
-  notes        String?
+  cancelReason   String?
+  notes          String?
   /// Unmapped columns from the source file.
   additionalData Json?
 
@@ -990,6 +1005,7 @@ model Investigation {
   @@index([tenantId, dueAt])
   @@index([tenantId, applicationNumber])
   @@index([tenantId, importBatchId])
+  @@index([tenantId, clientAccountId])
   // Same reasoning as Customer: the case list's search box matches partial
   // case and application numbers.
   @@index([caseNumber(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -1085,16 +1101,16 @@ model Assignment {
 
   /// Set on the row this one replaced, so the chain is walkable in both
   /// directions without a self-join on timestamps.
-  previousAssignmentId String?  @unique
+  previousAssignmentId String? @unique
   reassignReason       String?
   rejectReason         String?
 
   /// When the offer lapses if the investigator has not accepted. Written from
   /// the SLA policy at assignment time.
-  expiresAt  DateTime?
-  assignedAt DateTime  @default(now())
+  expiresAt   DateTime?
+  assignedAt  DateTime  @default(now())
   respondedAt DateTime?
-  closedAt   DateTime?
+  closedAt    DateTime?
 
   notes String?
 
@@ -1152,10 +1168,10 @@ model FormVersion {
   /// rules. Shape is validated by `forms/form-schema.validator.ts` on publish.
   schema Json
 
-  changeNote String?
+  changeNote  String?
   createdById String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   submissions    FormSubmission[]
   investigations Investigation[]
@@ -1275,6 +1291,10 @@ model ImportBatch {
   uploadedById String?
   uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
 
+  /// The client this file came from. Every case it creates belongs to it.
+  clientAccountId String?
+  clientAccount   ClientAccount? @relation(fields: [clientAccountId], references: [id], onDelete: SetNull)
+
   uploadedAt  DateTime  @default(now())
   parsedAt    DateTime?
   confirmedAt DateTime?
@@ -1289,6 +1309,7 @@ model ImportBatch {
   @@unique([tenantId, reference])
   @@index([tenantId, status])
   @@index([tenantId, uploadedAt])
+  @@index([tenantId, clientAccountId])
   @@map("import_batches")
 }
 
@@ -1343,7 +1364,7 @@ model ImportMappingTemplate {
   mapping Json
 
   /// Per-field constants applied when the sheet has no column for them.
-  defaults Json?
+  defaults           Json?
   /// Which duplicate rules to run for this client, by code.
   duplicateRuleCodes String[] @default([])
 
@@ -1390,16 +1411,16 @@ model MediaCategory {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  code      String
-  nameAr    String
-  nameEn    String
-  mediaType MediaType @default(PHOTO)
+  code       String
+  nameAr     String
+  nameEn     String
+  mediaType  MediaType @default(PHOTO)
   /// Whether every case of the relevant type must carry one.
-  isRequired Boolean  @default(false)
-  minCount   Int      @default(0)
+  isRequired Boolean   @default(false)
+  minCount   Int       @default(0)
   maxCount   Int?
-  sortOrder  Int      @default(0)
-  isActive   Boolean  @default(true)
+  sortOrder  Int       @default(0)
+  isActive   Boolean   @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1444,10 +1465,10 @@ model MediaAsset {
 
   /// Where and when the evidence was actually captured, as reported by the
   /// capturing device — distinct from when it was uploaded.
-  capturedAt  DateTime?
-  captureLat  Decimal?  @db.Decimal(10, 7)
-  captureLng  Decimal?  @db.Decimal(10, 7)
-  captureAccuracy Decimal? @db.Decimal(8, 2)
+  capturedAt      DateTime?
+  captureLat      Decimal?  @db.Decimal(10, 7)
+  captureLng      Decimal?  @db.Decimal(10, 7)
+  captureAccuracy Decimal?  @db.Decimal(8, 2)
 
   uploadedByType PrincipalType?
   uploadedById   String?
@@ -1531,13 +1552,13 @@ model QcRejectionReason {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  code       String
-  nameAr     String
-  nameEn     String
+  code      String
+  nameAr    String
+  nameEn    String
   /// Whether choosing this reason forces a free-text explanation.
-  needsNote  Boolean @default(false)
-  sortOrder  Int     @default(0)
-  isActive   Boolean @default(true)
+  needsNote Boolean @default(false)
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1567,11 +1588,11 @@ model QcReview {
   reviewerId String?
   reviewer   User?   @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
 
-  decision QcDecision
-  comment  String?
+  decision     QcDecision
+  comment      String?
   /// Per-field remarks keyed by form field key.
   fieldRemarks Json?
-  score    Int?
+  score        Int?
 
   reviewedAt DateTime @default(now())
 
@@ -1637,8 +1658,8 @@ model ReportTemplate {
   disclaimerAr  String?
   disclaimerEn  String?
 
-  pageSize   String @default("A4")
-  marginsMm  Json   @default("{\"top\":18,\"right\":14,\"bottom\":18,\"left\":14}")
+  pageSize  String @default("A4")
+  marginsMm Json   @default("{\"top\":18,\"right\":14,\"bottom\":18,\"left\":14}")
 
   isDefault Boolean @default(false)
   isActive  Boolean @default(true)
@@ -1683,8 +1704,8 @@ model Report {
   /// explained years later even if the case has moved on since.
   snapshot Json?
 
-  error       String?
-  jobId       String?
+  error         String?
+  jobId         String?
   requestedById String?
   requestedBy   User?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)
 
@@ -1784,9 +1805,9 @@ model Notification {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  recipientType PrincipalType
-  userId        String?
-  user          User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipientType  PrincipalType
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
   investigatorId String?
   investigator   Investigator? @relation(fields: [investigatorId], references: [id], onDelete: Cascade)
 
@@ -1805,9 +1826,9 @@ model Notification {
   entityId   String?
   link       String?
 
-  priority Priority @default(NORMAL)
-  readAt   DateTime?
-  sentAt   DateTime?
+  priority       Priority  @default(NORMAL)
+  readAt         DateTime?
+  sentAt         DateTime?
   /// Per-channel delivery outcome, for the channels that can fail.
   deliveryStatus Json?
 
@@ -1905,6 +1926,7 @@ enum AuditCategory {
   SETTINGS
   TENANT
   SECURITY
+  CHAT
 }
 
 enum AuditSeverity {
@@ -1933,8 +1955,8 @@ model AuditLog {
   userId    String?
   user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  entityType String?
-  entityId   String?
+  entityType  String?
+  entityId    String?
   entityLabel String?
 
   /// Only the fields that changed, not whole rows — a full before/after on a
@@ -1977,10 +1999,25 @@ model ClientAccount {
   contactEmail String?
   contactPhone String?
 
+  /// Storage key of the logo printed on this client's inquiry forms.
+  logoKey String?
+
+  /// The columns of this client's own inquiry file, in order:
+  /// [{ key, header, target, required }]. `target` is an import field key
+  /// (fullName, nationalId, …) or null for a field only this client sends,
+  /// which is kept on the case in `additionalData.clientFields`.
+  templateFields Json @default("[]")
+
+  /// The products and inquiry types this client's cases may have. Empty
+  /// means all. With exactly one, it is applied to rows whose file has no
+  /// column for it; a row naming one outside the list is rejected.
+  productIds           String[] @default([])
+  investigationTypeIds String[] @default([])
+
   /// SHA-256 of the API key. Rotating means writing a new hash.
-  apiKeyHash   String? @unique
-  apiKeyPrefix String?
-  webhookUrl   String?
+  apiKeyHash       String? @unique
+  apiKeyPrefix     String?
+  webhookUrl       String?
   webhookSecretEnc String?
 
   /// The portal login, when the client has one. A web user with the CLIENT_USER
@@ -1991,6 +2028,9 @@ model ClientAccount {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  investigations Investigation[]
+  importBatches  ImportBatch[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -2005,10 +2045,10 @@ model ClientAccount {
 /// including its fail-open posture: if the lease cannot be read the job runs
 /// anyway, so a missing migration can never silently stop a sweep.
 model CronLock {
-  name       String   @id
+  name        String   @id
   lockedUntil DateTime
-  lockedBy   String
-  updatedAt  DateTime @updatedAt
+  lockedBy    String
+  updatedAt   DateTime @updatedAt
 
   @@map("cron_locks")
 }
@@ -2028,4 +2068,189 @@ model IdempotencyKey {
 
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  OFFICE ATTENDANCE AND ANNOUNCEMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One stretch at work for a web user: check-in to check-out. Several per day
+/// are allowed (out for lunch, back again); only one may be open at a time,
+/// which the migration enforces with a partial unique index.
+///
+/// Idle time is accumulated, not derived: when activity resumes after a gap
+/// longer than the company idle threshold, the whole gap is added to
+/// `idleSeconds`. Worked time = (checkOut or now) - checkIn - idle.
+model AttendanceSession {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The calendar day in the company timezone, for daily reports.
+  workDate       DateTime  @db.Date
+  checkInAt      DateTime
+  checkOutAt     DateTime?
+  lastActivityAt DateTime
+
+  idleSeconds Int @default(0)
+  idlePeriods Int @default(0)
+
+  /// Closed by the system because it was left open past its day.
+  autoClosed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, workDate])
+  @@index([tenantId, userId, checkInAt])
+  @@map("attendance_sessions")
+}
+
+enum AnnouncementPriority {
+  NORMAL
+  IMPORTANT
+  URGENT
+}
+
+/// A message from the company to its office staff, shown on the home page.
+model Announcement {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  title    String
+  body     String
+  priority AnnouncementPriority @default(NORMAL)
+  pinned   Boolean              @default(false)
+
+  /// Role ids that see it. Empty means everyone in the company.
+  audienceRoleIds String[] @default([])
+
+  /// Hidden from the feed after this moment. Null means it stays.
+  expiresAt DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("AnnouncementAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  reads AnnouncementRead[]
+
+  @@index([tenantId, deletedAt, createdAt])
+  @@map("announcements")
+}
+
+/// "I have read this." One row per user per announcement.
+model AnnouncementRead {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  readAt DateTime @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([tenantId, userId])
+  @@map("announcement_reads")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  INTERNAL CHAT — one-to-one, office staff and field investigators
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One conversation per pair of people. `pairKey` is the two sides as
+/// "<TYPE>:<id>" in sorted order, so a unique constraint — not a lookup that two
+/// requests could both pass — guarantees the pair has exactly one thread.
+model ChatConversation {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  pairKey       String
+  lastMessageAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@unique([tenantId, pairKey])
+  @@index([tenantId, lastMessageAt])
+  @@map("chat_conversations")
+}
+
+/// A side of a conversation: a web user or an investigator. `lastReadAt`
+/// drives unread counts and the "seen" mark the other side sees.
+model ChatParticipant {
+  id             String           @id @default(uuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  principalType PrincipalType
+  principalId   String
+  lastReadAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([conversationId, principalType, principalId])
+  @@index([tenantId, principalType, principalId])
+  @@map("chat_participants")
+}
+
+/// A message. Deleting one keeps the row as a visible "deleted" trace (body
+/// and files removed), so the thread never silently changes shape.
+model ChatMessage {
+  id             String           @id @default(uuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  senderType PrincipalType
+  senderId   String
+  body       String?       @db.Text
+  deletedAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  attachments ChatAttachment[]
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("chat_messages")
+}
+
+/// A file sent in a message. The bytes live in storage under
+/// `t/<tenant>/chat/`; they are only ever served through the API, to a
+/// participant, and every download is audited.
+model ChatAttachment {
+  id        String      @id @default(uuid())
+  tenantId  String
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  storageKey String
+  fileName   String
+  mimeType   String
+  size       Int
+
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+  @@index([tenantId, createdAt])
+  @@map("chat_attachments")
 }

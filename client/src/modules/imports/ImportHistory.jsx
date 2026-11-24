@@ -8,6 +8,7 @@ import { P } from '../../utils/permissions';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import { StateBadge } from '../../components/Badges';
+import { localisedName } from '../../i18n';
 
 export default function ImportHistory() {
   const { t, i18n } = useTranslation();
@@ -38,6 +39,21 @@ export default function ImportHistory() {
           {row.reference}
         </Link>
       ),
+    },
+    {
+      key: 'client',
+      header: t('clients.client'),
+      render: (row) =>
+        row.clientAccount ? (
+          <Link
+            to={`/clients/${row.clientAccount.id}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {localisedName(row.clientAccount, i18n.language)}
+          </Link>
+        ) : (
+          <span className="text-body-tertiary">—</span>
+        ),
     },
     {
       key: 'fileName',
@@ -93,10 +109,12 @@ export default function ImportHistory() {
         title={t('imports.history')}
         subtitle={data?.meta ? `${data.meta.total}` : undefined}
         actions={
-          can(P.IMPORTS_CREATE) && (
-            <Link to="/imports/new" className="btn btn-sm btn-primary">
-              <i className="bi bi-plus-lg me-1" aria-hidden="true" />
-              {t('imports.newImport')}
+          // Uploads start inside a client now, where its template does the
+          // mapping.
+          can(P.CLIENTS_VIEW) && (
+            <Link to="/clients" className="btn btn-sm btn-primary">
+              <i className="bi bi-buildings me-1" aria-hidden="true" />
+              {t('clients.title')}
             </Link>
           )
         }

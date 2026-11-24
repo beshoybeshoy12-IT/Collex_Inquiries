@@ -143,6 +143,13 @@ export class CreateInvestigationDto {
   @Type(() => InlineCustomerDto)
   customer?: InlineCustomerDto;
 
+  @ApiPropertyOptional({
+    description: 'The bank or company this inquiry is for.',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientAccountId?: string;
+
   @ApiProperty()
   @IsUUID()
   productId: string;
@@ -226,6 +233,15 @@ export class TransitionInvestigationDto {
   @IsOptional()
   @IsEnum(InvestigationResult)
   result?: InvestigationResult;
+
+  @ApiPropertyOptional({
+    description:
+      'Move outside the state machine. Needs investigations.override_status ' +
+      'and a reason of at least 5 characters.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  override?: boolean;
 }
 
 export class InvestigationQueryDto extends PaginationQueryDto {
@@ -298,6 +314,11 @@ export class InvestigationQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   importBatchId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  clientAccountId?: string;
 
   @ApiPropertyOptional({ description: 'Unassigned cases only.' })
   @IsOptional()
